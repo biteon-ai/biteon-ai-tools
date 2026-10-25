@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Biteon AI Review</title>
+  <style>
+    :root {
+      --bg: #1b1714;
+      --panel: #261f1a;
+      --panel-2: #312821;
+      --line: #4a3d33;
+      --text: #f4efe6;
+      --muted: #b3a498;
+      --accent: #e0a15a;
+      --accent-ink: #2a1c0d;
+      --good: #8fbf86;
+      --bad: #e07a62;
+      --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --sans: "Avenir Next", "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.45 var(--sans);
+    }
+    button, input, textarea { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    header {
+      flex: none;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+      background: #221b16;
+    }
+    header h1 { margin: 0; font-size: 20px; letter-spacing: 0.01em; }
+    header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+    .status { font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: right; }
+    .status strong { color: var(--good); font-weight: 600; }
+    .status.down strong { color: var(--bad); }
+    main {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: 260px minmax(0, 1fr) 300px;
+    }
+    section, aside { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+    aside, .skills { border-right: 1px solid var(--line); background: var(--panel); }
+    .skills { border-right: 0; border-left: 1px solid var(--line); }
+    .pane-title {
+      padding: 12px 14px 8px;
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .search, .pathbar {
+      margin: 0 12px 10px;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+    .tree, .skill-list, .transcript, .preview { overflow: auto; }
+    .tree, .skill-list, .transcript { flex: 1; min-height: 0; }
+    .tree { padding: 0 8px 12px; }
+    .preview, .composer, .pathbar, .live, .pane-title, .search { flex: none; }
+    .row, .skill {
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      border: 0;
+      border-radius: 8px;
+      padding: 6px 8px;
+    }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .row:hover, .skill:hover, .row.selected, .skill.selected { background: var(--panel-2); }
+    .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .kind { width: 14px; color: var(--accent); font-family: var(--mono); font-size: 12px; }
+    .children { margin-left: 14px; }
+    .work { min-width: 0; }
+    .pathbar { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+    .pathbar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
+    .preview {
+      margin: 0 12px 10px;
+      max-height: 28%;
+      background: #140f0c;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      white-space: pre-wrap;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: #eadfce;
+    }
+    .transcript { flex: 1; padding: 0 12px 8px; }
+    .bubble {
+      margin: 0 0 10px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      white-space: pre-wrap;
+    }
+    .bubble.user { background: #3a2c20; }
+    .bubble.assistant { background: #2a241f; }
+    .bubble.report { font-family: var(--mono); font-size: 12px; }
+    .composer { padding: 0 12px 12px; display: grid; gap: 8px; }
+    textarea {
+      width: 100%;
+      min-height: 74px;
+      resize: vertical;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+    }
+    .actions { display: flex; gap: 8px; }
+    .primary, .ghost, .stop {
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      padding: 8px 12px;
+    }
+    .primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 650; }
+    .ghost, .stop { background: transparent; }
+    .primary:disabled, .ghost:disabled { opacity: 0.45; cursor: not-allowed; }
+    .skills-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .icon-actions { display: flex; gap: 4px; }
+    .icon-btn { width: 28px; height: 28px; padding: 4px; display: inline-flex; align-items: center; justify-content: center; }
+    .icon-btn svg { width: 16px; height: 16px; display: block; }
+    .icon-btn.on { background: #3d2e1d; color: var(--accent); }
+    .skill-form, .install-model { flex: none; margin: 0 12px 8px; }
+    .skill-form { display: grid; gap: 6px; }
+    .install-model { display: grid; gap: 6px; }
+    .skill-form[hidden], .install-model[hidden] { display: none; }
+    .skill-form input, .skill-form textarea { min-height: 0; color: #f4efe6; }
+    .skill-form textarea { min-height: 88px; }
+    .skill-note, #model-pull-status { margin: 0; color: var(--muted); font-size: 12px; }
+    .install-model input, .skill-form input { width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; color: #f4efe6; }
+    #model-pull-status { text-align: left; padding: 0 12px 6px; min-height: 0; flex: none; }
+    #model-pull-status:empty { display: none; }
+    .skill .remove { margin-top: 6px; padding: 2px 8px; font-size: 11px; }
+    .skill-list { padding: 0 10px 16px; }
+    .skill { margin-bottom: 8px; border: 1px solid transparent; }
+    .skill b { display: block; }
+    .skill small { display: block; color: var(--muted); margin-top: 3px; }
+    .skill small.desc {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .status { min-width: 24rem; }
+    .model { display: flex; flex-direction: column; align-items: stretch; gap: 4px; width: 100%; font-size: 12px; color: var(--muted); }
+    #model-name {
+      color: #f4efe6;
+      font-family: var(--mono);
+      font-size: 13px;
+      text-align: right;
+      line-height: 1.3;
+    }
+    .model select {
+      color: #f4efe6;
+      background: #14110e;
+      color-scheme: dark;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px 8px;
+      width: 100%;
+      height: 36px;
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+    .model select option { color: #f4efe6; background: #1b1714; }
+    .badge {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: #3d2e1d;
+      color: var(--accent);
+      font-size: 11px;
+    }
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(12, 9, 7, 0.72);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .modal.open { display: flex; }
+    .dialog {
+      width: min(560px, 100%);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .dialog h2 { margin: 0 0 8px; font-size: 18px; }
+    .dialog ul { margin: 8px 0; padding-left: 18px; max-height: 180px; overflow: auto; font-family: var(--mono); font-size: 12px; }
+    .dialog .actions { justify-content: flex-end; margin-top: 12px; }
+
+    .live {
+      margin: 0 12px 10px;
+      padding: 10px 12px;
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      background: #3a2a18;
+    }
+    .live[hidden] { display: none; }
+    .live-top { display: flex; align-items: center; gap: 10px; }
+    .live-actions { display: flex; gap: 6px; }
+    .live-actions button { padding: 4px 8px; white-space: nowrap; }
+    #stop-live { border-color: var(--bad); color: var(--bad); }
+    .live-top strong { flex: 1; }
+    #live-time { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid #8a6a3e;
+      border-top-color: #ffe0b0;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      flex: none;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .bar { margin-top: 8px; height: 8px; background: #1b1714; border-radius: 99px; overflow: hidden; }
+    #live-bar { height: 100%; width: 4%; background: linear-gradient(90deg, #a56b2d, #ffe0b0); transition: width 0.4s ease; }
+    #live-detail { margin-top: 6px; color: #f4efe6; font-family: var(--mono); font-size: 12px; }
+    @media (max-width: 980px) {
+      main { grid-template-columns: 1fr; grid-template-rows: 26vh minmax(0, 1fr) 30vh; }
+      body { height: 100vh; overflow: hidden; }
+      .status { min-width: 0; }
+    }
+    header { padding: 10px 16px; background: #241c17; }
+    header h1 { font-size: 18px; }
+    header p { max-width: 42rem; }
+    .status { min-width: 16rem; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+    #model-name { display: none; }
+    #ollama-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 3px 10px;
+      background: #1b1714;
+    }
+    .model select { height: 34px; }
+    .pane-title { font-weight: 650; }
+    .pathbar { background: #221b16; }
+    .preview { max-height: 180px; background: #120e0c; }
+    .preview[hidden] { display: none; }
+    .transcript { padding: 4px 12px 8px; }
+    .empty { margin: 48px auto 0; max-width: 440px; text-align: center; color: var(--muted); }
+    .empty strong { display: block; color: var(--text); font-size: 18px; font-weight: 650; margin-bottom: 6px; }
+    .empty p { margin: 0; }
+    .empty[hidden] { display: none; }
+    .composer {
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+      border-top: 1px solid var(--line);
+      background: #221b16;
+      padding: 10px 12px 12px;
+    }
+    textarea { min-height: 52px; max-height: 120px; }
+    .composer .actions { align-self: end; }
+    .skill { border: 1px solid #3d332c; background: #221b16; padding: 8px 10px; }
+    .skill:hover, .skill.selected { border-color: #8a6a3e; background: var(--panel-2); }
+    .skill b { font-size: 14px; }
+    .icon-btn { width: 32px; height: 32px; border-color: var(--line); background: #1b1714; }
+    .row.selected { box-shadow: inset 3px 0 0 var(--accent); }
+    button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
+  
+    .status { align-items: flex-end; min-width: 24rem; }
+    .model { flex-direction: row; align-items: center; gap: 10px; width: 24rem; margin: 0; }
+    .model-kicker { flex: none; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .model-field { position: relative; flex: 1; min-width: 0; }
+    .model-field::after {
+      content: "";
+      position: absolute;
+      right: 14px;
+      top: 50%;
+      width: 7px;
+      height: 7px;
+      border-right: 2px solid #e0a15a;
+      border-bottom: 2px solid #e0a15a;
+      transform: translateY(-70%) rotate(45deg);
+      pointer-events: none;
+    }
+    .model select {
+      appearance: none;
+      -webkit-appearance: none;
+      height: 40px;
+      padding: 0 36px 0 12px;
+      border-radius: 10px;
+      border: 1px solid #6a5644;
+      background: linear-gradient(180deg, #221c17, #12100e);
+      box-shadow: inset 0 1px 0 rgba(255, 236, 214, 0.05);
+      cursor: pointer;
+    }
+    .model select:hover { border-color: #c48a45; }
+    .model select:focus, .model select:focus-visible {
+      outline: none;
+      border-color: #e0a15a;
+      box-shadow: 0 0 0 3px rgba(224, 161, 90, 0.28);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Biteon AI Review</h1>
+      <p>Review project files on this machine with the model you select.</p>
+    </div>
+    <div class="status" id="status">
+      <div id="ollama-state">Checking Ollama…</div>
+      <label class="model">
+        <span class="model-kicker">Model</span>
+        <span class="model-field">
+          <span id="model-name">Loading model…</span>
+          <select id="model"></select>
+        </span>
+      </label>
+    </div>
+  </header>
+  <main>
+    <aside>
+      <div class="pane-title">Home</div>
+      <div class="tree" id="tree"></div>
+    </aside>
+    <section class="work">
+      <div class="pane-title">Review</div>
+      <div class="pathbar"><span id="selected">No file selected</span><button class="ghost" id="clear" type="button">Clear</button></div>
+      <div class="live" id="live" hidden>
+        <div class="live-top"><span class="spinner"></span><strong id="live-title">Review in progress</strong><span id="live-time">0:00</span><span class="live-actions"><button class="ghost" id="skip-live" type="button">Skip file</button><button class="stop" id="stop-live" type="button">Stop</button></span></div>
+        <div class="bar"><div id="live-bar"></div></div>
+        <div id="live-detail">Starting</div>
+      </div>
+      <pre class="preview" id="preview" hidden>Select a file to preview it.</pre>
+      <div class="transcript" id="transcript">
+        <div class="empty" id="empty">
+          <strong>Start a review</strong>
+          <p>Choose a project on the left. Then pick a skill on the right, or ask a question below.</p>
+        </div>
+      </div>
+      <form class="composer" id="composer">
+        <textarea id="message" placeholder="Ask about the selected file or folder"></textarea>
+        <div class="actions">
+          <button class="primary" id="send" type="submit">Send</button>
+          <button class="stop" id="stop" type="button" hidden>Stop</button>
+          <button class="ghost" id="download" type="button" hidden>Download report</button>
+          <button class="ghost" id="save-report" type="button" hidden>Save in project</button>
+        </div>
+      </form>
+    </section>
+    <aside class="skills">
+      <div class="pane-title skills-head">
+        <span>Installed skills</span>
+        <span class="icon-actions">
+          <button class="ghost icon-btn" id="add-model-open" type="button" title="Install a model" aria-label="Install a model">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8M5 7l3 3 3-3M3 13h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button class="ghost icon-btn" id="add-skill-open" type="button" title="Add a skill" aria-label="Add a skill">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v11M2.5 8h11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
+        </span>
+      </div>
+      <input class="search" id="filter" placeholder="Filter skills" />
+      <form class="install-model" id="model-form" hidden>
+        <input id="model-pull" placeholder="Model to install, e.g. qwen2.5-coder:7b" />
+        <button class="primary" type="submit">Install</button>
+      </form>
+      <div id="model-pull-status"></div>
+      <form class="skill-form" id="skill-form" hidden>
+        <input id="skill-name" placeholder="Skill name" maxlength="60" required />
+        <input id="skill-description" placeholder="What this skill is for" maxlength="400" />
+        <textarea id="skill-instructions" placeholder="Instructions the selected model should follow" required></textarea>
+        <div class="actions">
+          <button class="primary" type="submit">Save</button>
+          <button class="ghost" id="skill-form-cancel" type="button">Cancel</button>
+        </div>
+        <p class="skill-note" id="skill-note"></p>
+      </form>
+      <div class="skill-list" id="skills"></div>
+    </aside>
+  </main>
+  <div class="modal" id="modal">
+    <div class="dialog">
+      <h2 id="modal-title">Allow this run</h2>
+      <p id="modal-copy"></p>
+      <ul id="modal-files"></ul>
+      <div class="actions">
+        <button class="ghost" id="modal-cancel" type="button">Cancel</button>
+        <button class="primary" id="modal-allow" type="button">Allow and run</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    const state = {
+      path: null,
+      kind: null,
+      skillId: null,
+      skills: [],
+      controller: null,
+      plan: null,
+      history: [],
+      started: 0,
+      ticker: null,
+      progress: null,
+      waiting: false,
+      report: null,
+      halted: false,
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    function esc(text) {
+      return String(text ?? "");
+    }
+
+    function setEmpty(title, copy) {
+      const empty = $("empty");
+      if (!empty || empty.hidden) return;
+      empty.querySelector("strong").textContent = title;
+      empty.querySelector("p").textContent = copy;
+    }
+
+    function addBubble(className, text) {
+      const empty = $("empty");
+      if (empty) empty.hidden = true;
+      const node = document.createElement("div");
+      node.className = "bubble " + className;
+      node.textContent = text;
+      $("transcript").appendChild(node);
+      $("transcript").scrollTop = $("transcript").scrollHeight;
+      return node;
+    }
+
+    function fillModels(names, selected) {
+      const select = $("model");
+      const chosen = selected || select.value;
+      const current = [...select.options].map((opt) => opt.value).join("|");
+      if (current !== names.join("|")) {
+        select.textContent = "";
+        for (const name of names) {
+          const opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          select.appendChild(opt);
+        }
+      }
+      if (names.includes(chosen)) select.value = chosen;
+      $("model-name").textContent = select.value || "No model";
+      select.title = select.value;
+    }
+
+    async function refreshHealth() {
+      const status = $("status");
+      const stateNode = $("ollama-state");
+      try {
+        const data = await fetch("/api/health").then((res) => res.json());
+        status.className = "status" + (data.ollama ? "" : " down");
+        stateNode.innerHTML = data.ollama ? "Ollama <strong>up</strong>" : "Ollama <strong>down</strong>";
+        fillModels(data.models || [], data.model);
+      } catch {
+        status.className = "status down";
+        stateNode.textContent = "UI error";
+      }
+    }
+
+    function row(entry, depth) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "row";
+      button.dataset.path = entry.path;
+      const kind = document.createElement("span");
+      kind.className = "kind";
+      kind.textContent = entry.type === "dir" ? ">" : entry.type === "skipped" ? "·" : entry.secret ? "!" : " ";
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = entry.name;
+      button.append(kind, name);
+      button.onclick = () => choose(entry, button);
+      const wrap = document.createElement("div");
+      wrap.appendChild(button);
+      if (entry.type === "dir") {
+        const kids = document.createElement("div");
+        kids.className = "children";
+        kids.hidden = true;
+        wrap.appendChild(kids);
+        button.dataset.loaded = "0";
+        button._kids = kids;
+      }
+      return wrap;
+    }
+
+    async function loadDir(path, container) {
+      const data = await fetch("/api/files?path=" + encodeURIComponent(path)).then((res) => res.json());
+      container.textContent = "";
+      for (const entry of data.entries) container.appendChild(row(entry));
+    }
+
+    async function choose(entry, button) {
+      document.querySelectorAll(".row.selected").forEach((node) => node.classList.remove("selected"));
+      button.classList.add("selected");
+      $("preview").hidden = false;
+      if (entry.type === "skipped") {
+        state.path = null;
+        $("selected").textContent = entry.path + " is hidden";
+        $("preview").textContent = "node_modules, git history, and build output stay collapsed.";
+        return;
+      }
+      if (entry.type === "dir") {
+        state.path = entry.path;
+        state.kind = "dir";
+        $("selected").textContent = entry.path;
+        $("preview").textContent = "Folder selected. Any skill can review the source files inside it.";
+        setEmpty("Folder ready", "Pick a skill on the right to review it, or ask a question below.");
+        if (button.dataset.loaded === "0") {
+          button.dataset.loaded = "1";
+          button._kids.hidden = false;
+          await loadDir(entry.path, button._kids);
+        } else {
+          button._kids.hidden = !button._kids.hidden;
+        }
+        return;
+      }
+      state.path = entry.path;
+      state.kind = "file";
+      $("selected").textContent = entry.path;
+      setEmpty("File ready", "Ask a question below, or pick a skill to review this file.");
+      if (entry.secret) {
+        $("preview").textContent = "This file looks like a secret. It stays out of preview and out of the model.";
+        return;
+      }
+      $("preview").textContent = "Loading…";
+      const res = await fetch("/api/file?path=" + encodeURIComponent(entry.path));
+      const data = await res.json();
+      $("preview").textContent = res.ok ? data.text : (data.detail || "Could not read that file");
+    }
+
+    function renderSkills() {
+      const query = $("filter").value.trim().toLowerCase();
+      const list = $("skills");
+      list.textContent = "";
+      for (const skill of state.skills) {
+        const hay = (skill.name + " " + skill.description + " " + skill.source).toLowerCase();
+        if (query && !hay.includes(query)) continue;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "skill" + (skill.id === state.skillId ? " selected" : "");
+        const title = document.createElement("b");
+        title.textContent = skill.name;
+        const source = document.createElement("small");
+        source.className = "source";
+        source.textContent = skill.source;
+        const desc = document.createElement("small");
+        desc.className = "desc";
+        desc.textContent = skill.description || "No description";
+        button.append(title, source, desc);
+        const badge = document.createElement("span");
+        badge.className = "badge";
+        badge.textContent = skill.runnable ? "Review command" : "Model skill";
+        button.appendChild(badge);
+        if (skill.owned) {
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.className = "ghost remove";
+          remove.textContent = "Remove";
+          remove.onclick = async (event) => {
+            event.stopPropagation();
+            const response = await fetch("/api/skills/" + encodeURIComponent(skill.id), { method: "DELETE" });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              addBubble("report", data.detail || "Could not remove that skill");
+              return;
+            }
+            if (state.skillId === skill.id) state.skillId = null;
+            await loadSkills();
+          };
+          button.appendChild(remove);
+        }
+        button.onclick = () => askRun(skill);
+        list.appendChild(button);
+      }
+    }
+
+    async function askRun(skill) {
+      state.skillId = skill.id;
+      renderSkills();
+      if (!state.path) {
+        addBubble("report", "Select a file or folder in /home first.");
+        return;
+      }
+      const res = await fetch("/api/plan?skill_id=" + encodeURIComponent(skill.id) + "&path=" + encodeURIComponent(state.path));
+      const data = await res.json();
+      if (!res.ok) {
+        addBubble("report", data.detail || "That skill cannot run on this selection.");
+        return;
+      }
+      state.plan = data;
+      $("modal-title").textContent = data.mode === "command" ? "Allow review command" : "Allow Qwen to use this skill";
+      const extra = data.omitted ? " " + data.omitted + " more source files stay out of this run." : "";
+      $("modal-copy").textContent = (data.command || "Local chat with " + data.skill) + " on " + data.path + "." + extra;
+      const files = $("modal-files");
+      files.textContent = "";
+      for (const file of data.files) {
+        const item = document.createElement("li");
+        item.textContent = file;
+        files.appendChild(item);
+      }
+      $("modal").classList.add("open");
+    }
+
+    async function readStream(response, onEvent) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const step = await reader.read();
+        if (step.done) break;
+        buffer += decoder.decode(step.value, { stream: true });
+        let split = buffer.indexOf("\n\n");
+        while (split >= 0) {
+          const block = buffer.slice(0, split);
+          buffer = buffer.slice(split + 2);
+          const data = block.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("");
+          if (data) onEvent(JSON.parse(data));
+          split = buffer.indexOf("\n\n");
+        }
+      }
+    }
+
+    function clock(ms) {
+      const s = Math.max(0, Math.floor(ms / 1000));
+      return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+    }
+
+    function renderLive() {
+      const panel = $("live");
+      if (panel.hidden) return;
+      const elapsed = clock(Date.now() - state.started);
+      $("live-time").textContent = elapsed;
+      const p = state.progress;
+      if (!p || !p.total) {
+        $("live-detail").textContent = (state.waiting ? "Waiting for Qwen" : "Working") + " · " + elapsed;
+        $("live-bar").style.width = "12%";
+        return;
+      }
+      const name = (p.file || "").split("/").pop() || p.file;
+      let phase = "Receiving the report";
+      if (p.phase === "running" && state.waiting) phase = "Qwen is reading this file";
+      if (p.phase === "running" && !state.waiting) phase = "Report text is arriving";
+      if (p.phase === "done") phase = "File finished";
+      if (p.phase === "finished") phase = "Review finished";
+      $("live-title").textContent = p.phase === "finished" ? "Review finished" : ("File " + p.index + " of " + p.total);
+      $("live-detail").textContent = phase + (name ? " · " + name : "") + " · " + elapsed;
+      const done = p.phase === "done" || p.phase === "finished" ? p.index : Math.max(0, p.index - 1);
+      const partial = p.phase === "running" ? 0.15 : 0;
+      $("live-bar").style.width = Math.min(100, ((done + partial) / p.total) * 100) + "%";
+    }
+
+    function startLive(label) {
+      state.started = Date.now();
+      state.progress = null;
+      state.waiting = true;
+      $("live").hidden = false;
+      $("live-title").textContent = label;
+      $("live-bar").style.width = "8%";
+      renderLive();
+      clearInterval(state.ticker);
+      state.ticker = setInterval(renderLive, 500);
+    }
+
+    function stopLive(finished) {
+      clearInterval(state.ticker);
+      state.ticker = null;
+      if (finished && state.progress) {
+        state.progress = Object.assign({}, state.progress, { phase: "finished", index: state.progress.total || state.progress.index });
+        renderLive();
+        $("live-bar").style.width = "100%";
+        setTimeout(() => { $("live").hidden = true; }, 4000);
+        return;
+      }
+      $("live").hidden = true;
+    }
+
+    function setBusy(busy, label) {
+      $("send").disabled = busy;
+      $("stop").hidden = !busy;
+      $("modal-allow").disabled = busy;
+      if (busy) startLive(label || "Qwen is working");
+    }
+
+    async function haltReview() {
+      state.halted = true;
+      clearInterval(state.ticker);
+      state.ticker = null;
+      $("live").hidden = true;
+      $("send").disabled = false;
+      $("stop").hidden = true;
+      try {
+        await fetch("/api/stop", { method: "POST" });
+      } catch (error) {}
+      if (state.controller) state.controller.abort();
+    }
+
+    async function startRun() {
+      const plan = state.plan;
+      $("modal").classList.remove("open");
+      if (!plan) return;
+      const bubble = addBubble("report", "");
+      state.controller = new AbortController();
+      setBusy(true, "Review running");
+      try {
+        const response = await fetch("/api/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ skill_id: state.skillId, path: state.path, allow: true, model: $("model").value }),
+          signal: state.controller.signal,
+        });
+        if (!response.ok) {
+          const data = await response.json();
+          bubble.textContent = data.detail || "Run failed";
+          return;
+        }
+        await readStream(response, (event) => {
+          if (state.halted) return;
+          if (event.progress) {
+            state.progress = event.progress;
+            state.waiting = event.progress.phase === "running";
+            if (event.progress.phase === "running") $("skip-live").disabled = false;
+            if (event.progress.phase === "running") {
+              bubble.textContent += (bubble.textContent ? "\n" : "") + "[" + event.progress.index + "/" + event.progress.total + "] " + event.progress.file;
+            }
+          }
+          if (event.pulse) state.waiting = true;
+          if (event.error) bubble.textContent += (bubble.textContent ? "\n" : "") + event.error;
+          if (event.status) bubble.textContent += (bubble.textContent ? "\n" : "") + event.status;
+          if (event.line) {
+            state.waiting = false;
+            bubble.textContent += (bubble.textContent ? "\n" : "") + event.line;
+          }
+          if (event.token) {
+            state.waiting = false;
+            bubble.textContent += event.token;
+          }
+          renderLive();
+          $("transcript").scrollTop = $("transcript").scrollHeight;
+        });
+      } catch (error) {
+        if (error.name !== "AbortError") bubble.textContent += "\n" + error.message;
+      } finally {
+        const halted = state.halted;
+        state.halted = false;
+        setBusy(false);
+        if (halted) {
+          clearInterval(state.ticker);
+          $("live").hidden = true;
+        } else {
+          rememberReport(bubble.textContent);
+          stopLive(true);
+        }
+        state.controller = null;
+      }
+    }
+
+    $("composer").onsubmit = async (event) => {
+      event.preventDefault();
+      const text = $("message").value.trim();
+      if (!text) return;
+      addBubble("user", text);
+      state.history.push({ role: "user", content: text });
+      $("message").value = "";
+      const bubble = addBubble("assistant", "");
+      state.controller = new AbortController();
+      setBusy(true, "Qwen is writing");
+      try {
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: state.history.slice(-12),
+            path: state.path,
+            skill_id: state.skillId,
+            model: $("model").value,
+          }),
+          signal: state.controller.signal,
+        });
+        if (!response.ok) {
+          const data = await response.json();
+          bubble.textContent = data.detail || "Chat failed";
+          return;
+        }
+        await readStream(response, (ev) => {
+          if (ev.token) {
+            state.waiting = false;
+            bubble.textContent += ev.token;
+          }
+          if (ev.error) bubble.textContent += ev.error;
+          renderLive();
+          $("transcript").scrollTop = $("transcript").scrollHeight;
+        });
+      } catch (error) {
+        if (error.name !== "AbortError") bubble.textContent = error.message;
+      } finally {
+        if (bubble.textContent.trim()) state.history.push({ role: "assistant", content: bubble.textContent });
+        if (state.skillId) rememberReport(bubble.textContent);
+        setBusy(false);
+        stopLive(true);
+        state.controller = null;
+      }
+    };
+
+
+    function rememberReport(text) {
+      const body = (text || "").trim();
+      if (!body) return;
+      const skill = state.skills.find((item) => item.id === state.skillId);
+      state.report = {
+        skill: (state.plan && state.plan.skill) || (skill && skill.name) || "review",
+        path: state.path || "/home",
+        text: body,
+      };
+      $("download").hidden = false;
+      $("save-report").hidden = false;
+    }
+
+    function reportFileName() {
+      const parts = (state.report.path || "review").split("/").filter(Boolean).slice(-2);
+      const slug = parts.join("-").replace(/[^a-zA-Z0-9._-]+/g, "-");
+      return "qwen-review-" + (slug || "report") + ".md";
+    }
+
+    function reportMarkdown() {
+      const r = state.report;
+      return "# Biteon AI Review report\n\nSkill: " + r.skill + "\nPath: " + r.path + "\nWhen: " + new Date().toISOString() + "\n\n" + r.text + "\n";
+    }
+
+    $("download").onclick = () => {
+      if (!state.report || !state.report.text) return;
+      const blob = new Blob([reportMarkdown()], { type: "text/markdown" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = reportFileName();
+      link.click();
+      URL.revokeObjectURL(link.href);
+    };
+
+    $("save-report").onclick = async () => {
+      if (!state.report || !state.report.text) return;
+      $("save-report").disabled = true;
+      try {
+        const response = await fetch("/api/export", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(state.report),
+        });
+        const data = await response.json();
+        addBubble("report", response.ok ? ("Saved " + data.path) : (data.detail || "Could not save the report"));
+      } catch (error) {
+        addBubble("report", error.message);
+      } finally {
+        $("save-report").disabled = false;
+      }
+    };
+
+    $("model").onchange = () => {
+      $("model-name").textContent = $("model").value || "No model";
+      $("model").title = $("model").value;
+      fetch("/api/model", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: $("model").value }),
+      });
+    };
+
+    $("stop-live").onclick = () => haltReview();
+    $("skip-live").onclick = async () => {
+      $("skip-live").disabled = true;
+      $("live-detail").textContent = "Skipping this file…";
+      try {
+        await fetch("/api/skip", { method: "POST" });
+      } catch (error) {
+        $("live-detail").textContent = error.message;
+        $("skip-live").disabled = false;
+      }
+    };
+
+    $("stop").onclick = () => haltReview();
+    $("clear").onclick = () => {
+      state.path = null;
+      state.kind = null;
+      $("selected").textContent = "No file selected";
+      $("preview").hidden = true;
+      $("preview").textContent = "Select a file to preview it.";
+      setEmpty("Start a review", "Choose a project on the left. Then pick a skill on the right, or ask a question below.");
+      document.querySelectorAll(".row.selected").forEach((node) => node.classList.remove("selected"));
+    };
+    $("filter").oninput = renderSkills;
+    $("modal-cancel").onclick = () => $("modal").classList.remove("open");
+    $("modal-allow").onclick = startRun;
+
+    refreshHealth();
+    loadDir("/home", $("tree"));
+    async function loadSkills() {
+      const data = await fetch("/api/skills").then((res) => res.json());
+      state.skills = data.skills || [];
+      renderSkills();
+    }
+
+    $("add-model-open").onclick = () => {
+      const form = $("model-form");
+      form.hidden = !form.hidden;
+      $("add-model-open").classList.toggle("on", !form.hidden);
+      if (!form.hidden) $("model-pull").focus();
+    };
+    $("add-skill-open").onclick = () => {
+      const form = $("skill-form");
+      form.hidden = !form.hidden;
+      $("add-skill-open").classList.toggle("on", !form.hidden);
+      if (!form.hidden) {
+        $("skill-note").textContent = "A saved skill uses whichever model is selected above.";
+        $("skill-name").focus();
+      }
+    };
+    $("skill-form-cancel").onclick = () => {
+      $("skill-form").hidden = true;
+      $("add-skill-open").classList.remove("on");
+      $("skill-note").textContent = "";
+    };
+    $("skill-form").onsubmit = async (event) => {
+      event.preventDefault();
+      $("skill-note").textContent = "Saving…";
+      const response = await fetch("/api/skills", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: $("skill-name").value,
+          description: $("skill-description").value,
+          instructions: $("skill-instructions").value,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        $("skill-note").textContent = data.detail || "Could not save that skill";
+        return;
+      }
+      $("skill-name").value = "";
+      $("skill-description").value = "";
+      $("skill-instructions").value = "";
+      $("skill-form").hidden = true;
+      $("add-skill-open").classList.remove("on");
+      $("skill-note").textContent = "";
+      state.skillId = data.id;
+      await loadSkills();
+    };
+
+    $("model-form").onsubmit = async (event) => {
+      event.preventDefault();
+      const name = $("model-pull").value.trim();
+      if (!name) return;
+      const status = $("model-pull-status");
+      const button = event.target.querySelector("button");
+      button.disabled = true;
+      status.textContent = "Installing " + name + "…";
+      try {
+        const response = await fetch("/api/models/pull", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: name }),
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          status.textContent = data.detail || "Install failed";
+          return;
+        }
+        await readStream(response, (ev) => {
+          if (ev.error) status.textContent = ev.error;
+          else if (ev.status) status.textContent = ev.status + (ev.percent == null ? "" : " " + ev.percent + "%");
+          if (ev.done) {
+            if (ev.models) fillModels(ev.models, ev.model || name);
+            status.textContent = "Installed " + (ev.model || name);
+            $("model-pull").value = "";
+          }
+        });
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    };
+
+    loadSkills();
+  </script>
+</body>
+</html>
