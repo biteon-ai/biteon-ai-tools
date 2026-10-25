@@ -21,5 +21,11 @@ if ! ollama show qwen:security-audit >/dev/null 2>&1; then
   echo "Creating qwen:security-audit"
   ollama create qwen:security-audit -f /Modelfile
 fi
+for extra in qwen2.5-coder:7b qwen2.5-coder:14b; do
+  if ! ollama show "$extra" >/dev/null 2>&1; then
+    echo "Pulling $extra"
+    ollama pull "$extra"
+  fi
+done
 echo "Models ready"
 ollama list
