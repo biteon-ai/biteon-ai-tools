@@ -1,4 +1,4 @@
-"""Local Qwen review UI. Binds to loopback and talks only to Ollama on this machine."""
+"""Qwen review UI. Talks only to Ollama on this machine."""
 
 from __future__ import annotations
 
@@ -18,6 +18,8 @@ HOME_DISPLAY = os.environ.get("HOME_DISPLAY", "/home").rstrip("/")
 OLLAMA_BASE = os.environ.get("OLLAMA_BASE", "http://127.0.0.1:11434/v1").rstrip("/")
 OLLAMA_ROOT = os.environ.get("OLLAMA_ROOT", "http://127.0.0.1:11434").rstrip("/")
 MODEL = os.environ.get("MODEL", "qwen:security-audit")
+BIND_HOST = os.environ.get("BIND_HOST", "127.0.0.1")
+BIND_PORT = os.environ.get("BIND_PORT", "8787")
 STATIC = Path(__file__).resolve().parent / "static"
 
 SKILL_ROOTS = [
@@ -303,7 +305,7 @@ async def health():
         "models": names,
         "model_present": chosen in names,
         "home": HOME_DISPLAY,
-        "bind": "127.0.0.1:8787",
+        "bind": f"{BIND_HOST}:{BIND_PORT}",
     }
 
 

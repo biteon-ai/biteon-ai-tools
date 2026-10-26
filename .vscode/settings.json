@@ -1,0 +1,19 @@
+{
+  "remote.autoForwardPorts": true,
+  "remote.autoForwardPortsSource": "hybrid",
+  "remote.restoreForwardedPorts": true,
+  "remote.SSH.defaultForwardedPorts": [
+    {
+      "name": "Biteon AI Review",
+      "localPort": 8787,
+      "remotePort": 8787
+    }
+  ],
+  "remote.portsAttributes": {
+    "8787": {
+      "label": "Biteon AI Review",
+      "protocol": "http",
+      "onAutoForward": "openBrowser"
+    }
+  }
+}

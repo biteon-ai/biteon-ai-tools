@@ -25,6 +25,6 @@ fi
 docker compose up -d --build
 echo
 echo "Stack is starting. The first run downloads about 19GB."
-echo "UI: http://127.0.0.1:8787"
-echo "From your laptop: ssh -L 8787:127.0.0.1:8787 user@this-vps"
+echo "UI: http://THIS_SERVER:8787"
+echo "No sign-in. In Cursor over SSH, http://127.0.0.1:8787 uses the connection you already have."
 echo "Follow the model download with: docker compose logs -f model-init"
