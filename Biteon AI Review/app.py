@@ -9,8 +9,8 @@ import os
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 HOME_ROOT = Path(os.environ.get("HOME_ROOT", "/home")).resolve()
@@ -83,6 +83,34 @@ async def resolve_model(requested: str | None) -> str:
 
 
 app = FastAPI(title="Biteon AI Review")
+
+TUNNEL_COMMAND = "ssh -L 8787:127.0.0.1:8787 root@212.132.71.99"
+GATE_COOKIE = "ssh_tunnel_ok"
+GATE_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Biteon AI Review</title>
+<script>
+alert("Run this in your terminal and leave it open before the site opens:\\n\\n__COMMAND__");
+location.replace("/?ack=1");
+</script>
+</head>
+<body></body>
+</html>
+""".replace("__COMMAND__", TUNNEL_COMMAND)
+
+
+@app.middleware("http")
+async def tunnel_alert(request: Request, call_next):
+    if request.method == "GET" and request.url.path == "/":
+        if request.cookies.get(GATE_COOKIE) != "1":
+            if request.query_params.get("ack") == "1":
+                response = RedirectResponse("/", status_code=303)
+                response.set_cookie(GATE_COOKIE, "1", httponly=True, samesite="lax", path="/")
+                return response
+            return HTMLResponse(GATE_PAGE, headers={"Cache-Control": "no-store"})
+    return await call_next(request)
 
 
 def to_display(path: Path) -> str:

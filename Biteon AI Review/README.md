@@ -44,9 +44,15 @@ docker compose logs -f model-init
 
 `qwen-model-init` exits with code 0 when the models are ready. That container is not meant to stay running. `qwen-ollama` and `qwen-ui` stay up.
 
-Open http://THIS_SERVER:8787 in a browser. There is no sign-in.
+The site listens on `127.0.0.1:8787` on this machine only. It is not reachable from the internet.
 
-Ollama stays on this machine. The website is the only port published. With this folder open in Cursor over SSH, port 8787 is forwarded on that same connection, so http://127.0.0.1:8787 works without a separate `ssh -L` command. Reload the Cursor window once so it picks up that forward.
+On your laptop, run this in a terminal and leave that terminal open:
+
+```bash
+ssh -L 8787:127.0.0.1:8787 root@212.132.71.99
+```
+
+Then open http://127.0.0.1:8787. The browser shows an alert with that command and an OK button before the page opens. Press OK to enter the site. Close the terminal and the site can no longer be reached.
 
 ## Use
 
