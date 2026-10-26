@@ -46,13 +46,7 @@ docker compose logs -f model-init
 
 The site listens on `127.0.0.1:8787` on this machine only. It is not reachable from the internet.
 
-On your laptop, run this in a terminal and leave that terminal open:
-
-```bash
-ssh -L 8787:127.0.0.1:8787 root@212.132.71.99
-```
-
-Then open http://127.0.0.1:8787. Before the page opens, the site shows that command with **Copy** and **OK**. Press Copy to put the command on the clipboard, then press OK to enter the site. Close the terminal and the site can no longer be reached.
+On your laptop, run the SSH command shown at the top of the site and leave that terminal open. The command uses this machine's current address. Then open http://127.0.0.1:8787. **Copy** is on that bar. Close the terminal and the site can no longer be reached.
 
 ## Use
 

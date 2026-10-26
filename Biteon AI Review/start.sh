@@ -25,8 +25,10 @@ fi
 docker compose up -d --build
 echo
 echo "Stack is starting. The first run downloads about 19GB."
+vps_ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')
 echo "UI listens on 127.0.0.1:8787 on this machine only."
 echo "On your laptop, run this in a terminal and leave it open:"
-echo "  ssh -L 8787:127.0.0.1:8787 root@212.132.71.99"
+echo "  ssh -L 8787:127.0.0.1:8787 root@${vps_ip:-this-machine}"
+echo "The same command stays at the top of the site and uses this machine's current address."
 echo "Then open http://127.0.0.1:8787"
 echo "Follow the model download with: docker compose logs -f model-init"

@@ -7,10 +7,11 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import socket
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 HOME_ROOT = Path(os.environ.get("HOME_ROOT", "/home")).resolve()
@@ -84,69 +85,32 @@ async def resolve_model(requested: str | None) -> str:
 
 app = FastAPI(title="Biteon AI Review")
 
-TUNNEL_COMMAND = "ssh -L 8787:127.0.0.1:8787 root@212.132.71.99"
-GATE_COOKIE = "ssh_tunnel_ok"
-GATE_PAGE = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Biteon AI Review</title>
-<style>
-  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #1b1714; color: #f4efe6; font: 15px/1.45 "Segoe UI", sans-serif; }
-  .dialog { width: min(560px, calc(100% - 32px)); background: #261f1a; border: 1px solid #4a3d33; border-radius: 12px; padding: 16px; }
-  h1 { margin: 0 0 8px; font-size: 18px; }
-  p { margin: 0; }
-  input { width: 100%; box-sizing: border-box; margin-top: 12px; padding: 10px 12px; border-radius: 8px; border: 1px solid #4a3d33; background: #140f0c; color: #f4efe6; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
-  button { border-radius: 8px; border: 1px solid #4a3d33; padding: 8px 12px; font: inherit; cursor: pointer; }
-  #copy { background: transparent; color: #f4efe6; }
-  #ok { background: #e0a15a; color: #2a1c0d; border-color: transparent; font-weight: 650; }
-</style>
-</head>
-<body>
-  <div class="dialog" role="alertdialog" aria-labelledby="title">
-    <h1 id="title">Run this in your terminal first</h1>
-    <p>Leave the terminal open, then press OK. The site stays closed until you do.</p>
-    <input id="cmd" readonly value="__COMMAND__" aria-label="SSH command" />
-    <div class="actions">
-      <button id="copy" type="button">Copy</button>
-      <button id="ok" type="button">OK</button>
-    </div>
-  </div>
-  <script>
-    const command = document.getElementById("cmd");
-    document.getElementById("copy").onclick = async () => {
-      command.focus();
-      command.select();
-      let copied = false;
-      try {
-        await navigator.clipboard.writeText(command.value);
-        copied = true;
-      } catch (error) {
-        copied = document.execCommand("copy");
-      }
-      document.getElementById("copy").textContent = copied ? "Copied" : "Copy";
-    };
-    document.getElementById("ok").onclick = () => location.replace("/?ack=1");
-    command.focus();
-    command.select();
-  </script>
-</body>
-</html>
-""".replace("__COMMAND__", TUNNEL_COMMAND)
+
+def tunnel_target() -> str:
+    configured = os.environ.get("SSH_HOST", "").strip()
+    if configured:
+        return configured
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("1.1.1.1", 80))
+        address = sock.getsockname()[0]
+    except OSError:
+        return ""
+    finally:
+        sock.close()
+    if not address or address.startswith("127."):
+        return ""
+    return address
 
 
-@app.middleware("http")
-async def tunnel_alert(request: Request, call_next):
-    if request.method == "GET" and request.url.path == "/":
-        if request.cookies.get(GATE_COOKIE) != "1":
-            if request.query_params.get("ack") == "1":
-                response = RedirectResponse("/", status_code=303)
-                response.set_cookie(GATE_COOKIE, "1", httponly=True, samesite="lax", path="/")
-                return response
-            return HTMLResponse(GATE_PAGE, headers={"Cache-Control": "no-store"})
-    return await call_next(request)
+def tunnel_command() -> str:
+    host = tunnel_target()
+    if not host:
+        return ""
+    user = os.environ.get("SSH_USER", "root").strip() or "root"
+    if not all(ch.isalnum() or ch in "-_" for ch in user):
+        user = "root"
+    return f"ssh -L {BIND_PORT}:127.0.0.1:{BIND_PORT} {user}@{host}"
 
 
 def to_display(path: Path) -> str:
@@ -370,6 +334,7 @@ async def health():
         "model_present": chosen in names,
         "home": HOME_DISPLAY,
         "bind": f"{BIND_HOST}:{BIND_PORT}",
+        "tunnel": tunnel_command(),
     }
 
 
