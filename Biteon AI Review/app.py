@@ -90,13 +90,49 @@ GATE_PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Biteon AI Review</title>
-<script>
-alert("Run this in your terminal and leave it open before the site opens:\\n\\n__COMMAND__");
-location.replace("/?ack=1");
-</script>
+<style>
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #1b1714; color: #f4efe6; font: 15px/1.45 "Segoe UI", sans-serif; }
+  .dialog { width: min(560px, calc(100% - 32px)); background: #261f1a; border: 1px solid #4a3d33; border-radius: 12px; padding: 16px; }
+  h1 { margin: 0 0 8px; font-size: 18px; }
+  p { margin: 0; }
+  input { width: 100%; box-sizing: border-box; margin-top: 12px; padding: 10px 12px; border-radius: 8px; border: 1px solid #4a3d33; background: #140f0c; color: #f4efe6; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+  button { border-radius: 8px; border: 1px solid #4a3d33; padding: 8px 12px; font: inherit; cursor: pointer; }
+  #copy { background: transparent; color: #f4efe6; }
+  #ok { background: #e0a15a; color: #2a1c0d; border-color: transparent; font-weight: 650; }
+</style>
 </head>
-<body></body>
+<body>
+  <div class="dialog" role="alertdialog" aria-labelledby="title">
+    <h1 id="title">Run this in your terminal first</h1>
+    <p>Leave the terminal open, then press OK. The site stays closed until you do.</p>
+    <input id="cmd" readonly value="__COMMAND__" aria-label="SSH command" />
+    <div class="actions">
+      <button id="copy" type="button">Copy</button>
+      <button id="ok" type="button">OK</button>
+    </div>
+  </div>
+  <script>
+    const command = document.getElementById("cmd");
+    document.getElementById("copy").onclick = async () => {
+      command.focus();
+      command.select();
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(command.value);
+        copied = true;
+      } catch (error) {
+        copied = document.execCommand("copy");
+      }
+      document.getElementById("copy").textContent = copied ? "Copied" : "Copy";
+    };
+    document.getElementById("ok").onclick = () => location.replace("/?ack=1");
+    command.focus();
+    command.select();
+  </script>
+</body>
 </html>
 """.replace("__COMMAND__", TUNNEL_COMMAND)
 

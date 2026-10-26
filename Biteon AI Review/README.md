@@ -52,7 +52,7 @@ On your laptop, run this in a terminal and leave that terminal open:
 ssh -L 8787:127.0.0.1:8787 root@212.132.71.99
 ```
 
-Then open http://127.0.0.1:8787. The browser shows an alert with that command and an OK button before the page opens. Press OK to enter the site. Close the terminal and the site can no longer be reached.
+Then open http://127.0.0.1:8787. Before the page opens, the site shows that command with **Copy** and **OK**. Press Copy to put the command on the clipboard, then press OK to enter the site. Close the terminal and the site can no longer be reached.
 
 ## Use
 
