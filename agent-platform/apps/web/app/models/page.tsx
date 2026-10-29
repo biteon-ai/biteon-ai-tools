@@ -17,7 +17,10 @@ export default function ModelsPage() {
   const [provider, setProvider] = useState({ name: "Ollama", type: "ollama", baseUrl: "http://host.docker.internal:11434/v1", costClass: "local", apiKey: "" });
   const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
   const [savingProvider, setSavingProvider] = useState(false);
-  const [model, setModel] = useState({ providerId: "", modelId: "qwen2.5-coder", displayName: "Qwen", costClass: "local" });
+  const [model, setModel] = useState({ providerId: "", modelId: "", displayName: "", costClass: "local" });
+  const [catalog, setCatalog] = useState<{ id: string; displayName: string }[]>([]);
+  const [catalogNote, setCatalogNote] = useState("");
+  const [loadingCatalog, setLoadingCatalog] = useState(false);
 
   function costFor(type: string): string {
     if (type === "ollama") return "local";
@@ -33,6 +36,31 @@ export default function ModelsPage() {
   }
 
   useEffect(() => { void load().catch((err: Error) => toast(err.message, "error")); }, [toast]);
+  useEffect(() => {
+    if (!model.providerId) return;
+    let cancelled = false;
+    setLoadingCatalog(true);
+    setCatalogNote("");
+    void api<{ models: { id: string; displayName: string }[] }>(`/api/providers/${model.providerId}/models`).then((result) => {
+      if (cancelled) return;
+      setCatalog(result.models);
+      const first = result.models[0];
+      setModel((current) => {
+        if (current.providerId !== model.providerId) return current;
+        const chosen = result.models.find((item) => item.id === current.modelId) ?? first;
+        return chosen ? { ...current, modelId: chosen.id, displayName: current.modelId === chosen.id && current.displayName ? current.displayName : chosen.displayName } : { ...current, modelId: "", displayName: "" };
+      });
+      setCatalogNote(result.models.length ? `${result.models.length} models from this provider. Pick one and change the display name if you want.` : "This provider returned no models.");
+    }).catch((err: Error) => {
+      if (cancelled) return;
+      setCatalog([]);
+      setModel((current) => current.providerId === model.providerId ? { ...current, modelId: "", displayName: "" } : current);
+      setCatalogNote(err.message);
+    }).finally(() => {
+      if (!cancelled) setLoadingCatalog(false);
+    });
+    return () => { cancelled = true; };
+  }, [model.providerId]);
 
   function matchingProvider() {
     const name = provider.name.trim().toLowerCase();
@@ -198,7 +226,7 @@ export default function ModelsPage() {
       <section className="space-y-3">
         <div>
           <h2 className="text-sm font-medium text-slate-200">Models</h2>
-          <p className="text-sm text-slate-500">Assign a model to planning, coding, testing, or review.</p>
+          <p className="text-sm text-slate-500">Each provider loads its own model list. Pick one, change the display name if you want, then add it.</p>
         </div>
         <form onSubmit={addModel} autoComplete="off" className="card space-y-4 p-4 md:p-5">
           <div className="grid gap-4 md:grid-cols-2">
@@ -213,8 +241,15 @@ export default function ModelsPage() {
               </select>
             </label>
             <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-slate-400">Model id</span>
-              <input className="input font-mono text-[13px]" aria-label="Model id" autoComplete="off" spellCheck={false} value={model.modelId} onChange={(event) => setModel({ ...model, modelId: event.target.value })} placeholder="qwen2.5-coder" />
+              <span className="text-xs font-medium text-slate-400">Model</span>
+              <select className="input" aria-label="Model" value={model.modelId} disabled={loadingCatalog || catalog.length === 0} onChange={(event) => {
+                const chosen = catalog.find((item) => item.id === event.target.value);
+                setModel({ ...model, modelId: event.target.value, displayName: chosen?.displayName ?? event.target.value });
+              }}>
+                {catalog.length === 0 ? <option value="">{loadingCatalog ? "Loading models…" : "No models loaded"}</option> : null}
+                {catalog.map((item) => <option key={item.id} value={item.id}>{item.displayName === item.id ? item.displayName : `${item.displayName} · ${item.id}`}</option>)}
+              </select>
+              {catalogNote ? <span className="block text-xs text-slate-500">{catalogNote}</span> : null}
             </label>
             <label className="block space-y-1.5">
               <span className="text-xs font-medium text-slate-400">Display name</span>
@@ -226,7 +261,7 @@ export default function ModelsPage() {
             </label>
           </div>
           <div className="flex justify-end border-t border-slate-800 pt-4">
-            <button className="btn" type="submit" disabled={providers.length === 0}>Add model</button>
+            <button className="btn" type="submit" disabled={providers.length === 0 || !model.modelId || loadingCatalog}>{loadingCatalog ? "Loading models…" : "Add model"}</button>
           </div>
         </form>
         {models.length === 0 ? <p className="text-sm text-slate-500">No models yet.</p> : (

@@ -6,3 +6,4 @@ export * from "./telegram.js";
 export * from "./pairing.js";
 export * from "./board-factory.js";
 export * from "./refresh-board.js";
+export * from "./provider-models.js";

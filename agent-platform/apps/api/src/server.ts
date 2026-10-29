@@ -61,7 +61,7 @@ import {
   type PlatformEnv,
 } from "@agent-platform/core";
 import type { PlatformStore } from "@agent-platform/db";
-import { createBoardClient, listBoardColumns, listGithubProjects, listTrelloBoards, listTrelloLists, mergeApprovedChanges, PAIRING_TTL_SECONDS, parseCredentials, readTrelloCardMove, refreshStoredBoard, registerTrelloWebhook, sendTelegramMessage, telegramBotProfile, telegramDeepLink, type PairingStore } from "@agent-platform/integrations";
+import { createBoardClient, listBoardColumns, listGithubProjects, listTrelloBoards, listTrelloLists, mergeApprovedChanges, PAIRING_TTL_SECONDS, parseCredentials, readTrelloCardMove, refreshStoredBoard, listProviderModels, registerTrelloWebhook, sendTelegramMessage, telegramBotProfile, telegramDeepLink, type PairingStore } from "@agent-platform/integrations";
 import type { TickQueue } from "./queue.js";
 
 export interface ServerDeps {
@@ -710,6 +710,31 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!provider) return reply.code(404).send({ error: "provider not found" });
     return probeProvider(deps, provider);
   });
+  app.get("/api/providers/:id/models", async (request, reply) => {
+    const provider = await deps.store.getProvider(idParam(request));
+    if (!provider) return reply.code(404).send({ error: "provider not found" });
+    const secret = provider.secretId ? await deps.store.getSecret(provider.secretId) : null;
+    let apiKey = "";
+    try {
+      apiKey = secret ? decryptSecret(secret, deps.env.APP_MASTER_KEY) : "";
+    } catch {
+      apiKey = "";
+    }
+    if (!apiKey) apiKey = providerKeyFromEnv(deps.env, provider.type);
+    const fallback = providerKeyFromEnv(deps.env, provider.type);
+    try {
+      return { models: await listProviderModels({ type: provider.type, baseUrl: provider.baseUrl, apiKey, fetchImpl: deps.fetchImpl }) };
+    } catch (error) {
+      if (fallback && fallback !== apiKey) {
+        try {
+          return { models: await listProviderModels({ type: provider.type, baseUrl: provider.baseUrl, apiKey: fallback, fetchImpl: deps.fetchImpl }) };
+        } catch {
+          // The saved provider key and the environment key both failed.
+        }
+      }
+      return reply.code(502).send({ error: error instanceof Error ? error.message : "Could not load models" });
+    }
+  });
 
   app.get("/api/models", async () => deps.store.listModels());
   app.post("/api/models", async (request, reply) => {
@@ -1171,6 +1196,12 @@ async function publishDecision(deps: ServerDeps, agent: Agent | null, task: Task
     delivered,
     createdAt: nowIso(),
   });
+}
+
+function providerKeyFromEnv(env: PlatformEnv, type: string): string {
+  if (type === "cursor") return env.CURSOR_API_KEY;
+  if (type === "openai" || type === "codex") return env.OPENAI_API_KEY || env.CODEX_API_KEY;
+  return "";
 }
 
 async function probeProvider(deps: ServerDeps, provider: ProviderRecord) {

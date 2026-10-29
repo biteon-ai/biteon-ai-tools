@@ -9,6 +9,7 @@ import { parseProjectItems } from "./github.js";
 import { openLinkedChanges, mergeApprovedChanges } from "./changes.js";
 import { WorkspaceGit } from "./git.js";
 import { createPairingStore, memoryPairingStore, parsePairingStart, telegramDeepLink, type PairingCache } from "./pairing.js";
+import { listProviderModels, readModelCatalog } from "./provider-models.js";
 import { listTrelloCards, readTrelloCardMove, registerTrelloWebhook, trelloListId } from "./trello.js";
 import { telegramBotProfile } from "./telegram.js";
 
@@ -339,6 +340,44 @@ describe("integrations", () => {
     expect(calls.find((call) => call.method === "PATCH")?.body).toContain("develop");
     expect(calls.some((call) => call.method === "PUT" && call.url.endsWith("/merge"))).toBe(true);
     expect(JSON.stringify(calls)).not.toContain("secret-token");
+  });
+});
+
+describe("provider model catalogs", () => {
+  it("reads Cursor, OpenAI, and Ollama catalog shapes", () => {
+    expect(readModelCatalog({ items: [{ id: "grok-4.7", displayName: "Grok 4.7" }, { id: "auto-smart", displayName: "Auto" }] })).toEqual([
+      { id: "grok-4.7", displayName: "Grok 4.7" },
+      { id: "auto-smart", displayName: "Auto" },
+    ]);
+    expect(readModelCatalog({ data: [{ id: "qwen2.5-coder" }, { id: "claude-sonnet", display_name: "Claude Sonnet" }] })).toEqual([
+      { id: "qwen2.5-coder", displayName: "qwen2.5-coder" },
+      { id: "claude-sonnet", displayName: "Claude Sonnet" },
+    ]);
+    expect(readModelCatalog({ models: [{ name: "qwen2.5-coder:latest" }] })).toEqual([
+      { id: "qwen2.5-coder:latest", displayName: "qwen2.5-coder:latest" },
+    ]);
+  });
+
+  it("loads a provider catalog and keeps the API key out of errors", async () => {
+    const calls: { url: string; authorization: string }[] = [];
+    const models = await listProviderModels({
+      type: "cursor",
+      baseUrl: "",
+      apiKey: "cursor-secret-key",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), authorization: new Headers(init?.headers).get("authorization") ?? "" });
+        return new Response(JSON.stringify({ items: [{ id: "composer-2.5", displayName: "Composer 2.5" }] }));
+      },
+    });
+    expect(models).toEqual([{ id: "composer-2.5", displayName: "Composer 2.5" }]);
+    expect(calls[0]?.url).toBe("https://api.cursor.com/v1/models");
+    expect(calls[0]?.authorization).toBe("Bearer cursor-secret-key");
+    await expect(listProviderModels({
+      type: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-secret",
+      fetchImpl: async () => new Response("invalid key sk-secret", { status: 401 }),
+    })).rejects.toThrow("Model list returned 401");
   });
 });
 
