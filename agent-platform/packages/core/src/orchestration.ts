@@ -130,6 +130,7 @@ async function continueTask(deps: TickDeps, tasks: Task[], task: Task): Promise<
       const stall = describeStall(run, checkpoint, deps.agent.rules.stallMinutes, now);
       const blocked = transitionTask(task, "blocked", { now: now.toISOString(), reason: stall.summary });
       await deps.saveTask(blocked);
+      await push(deps, blocked, "blocked");
       run.status = "failed";
       run.error = blocked.blockedReason;
       run.finishedAt = now.toISOString();
@@ -198,7 +199,32 @@ async function startTask(deps: TickDeps, tasks: Task[], original: Task, alreadyD
 }
 
 async function execute(deps: TickDeps, _tasks: Task[], task: Task, run: TaskRun, checkpoint: Checkpoint | null): Promise<TickResult> {
-  const prepared = await deps.git.prepare(deps.agent, task, checkpoint?.ownedFiles ?? []);
+  let prepared: { branch: string; dirtyForeign: boolean };
+  try {
+    prepared = await deps.git.prepare(deps.agent, task, checkpoint?.ownedFiles ?? []);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "git prepare failed";
+    const accessDenied = /403|404|not found|write access|authentication failed|could not read username/i.test(detail);
+    const reasons = [
+      "Repository checkout failed before the executor could start.",
+      detail,
+      accessDenied
+        ? "The connected GitHub token authenticated, but cannot access one or more configured repositories. Reconnect a token with Contents read/write on those repos."
+        : "Confirm the GitHub account token can clone the primary and linked repositories.",
+    ];
+    const blocked = transitionTask(task, "blocked", { now: deps.now.toISOString(), reason: reasons[0]! });
+    await deps.saveTask(blocked);
+    await push(deps, blocked, "blocked");
+    run.status = "failed";
+    run.error = `${reasons[0]} ${detail}`.trim();
+    run.finishedAt = deps.now.toISOString();
+    await deps.updateRun(run);
+    deps.scheduler.activeRunId = null;
+    deps.scheduler.consecutiveFailures += 1;
+    await deps.saveScheduler(deps.scheduler);
+    await deps.notify(draft(deps, blocked, "urgent", "Repository checkout failed", formatReasonBlock(reasons), "Reconnect the GitHub account token, then resume the agent."));
+    return { action: "blocked", taskId: task.id, detail: run.error };
+  }
   if (prepared.dirtyForeign) {
     const reasons = [
       "Workspace has changes the agent does not own.",
@@ -207,6 +233,7 @@ async function execute(deps: TickDeps, _tasks: Task[], task: Task, run: TaskRun,
     ];
     const blocked = transitionTask(task, "blocked", { now: deps.now.toISOString(), reason: reasons[0]! });
     await deps.saveTask(blocked);
+    await push(deps, blocked, "blocked");
     run.status = "failed";
     run.error = blocked.blockedReason;
     run.finishedAt = deps.now.toISOString();

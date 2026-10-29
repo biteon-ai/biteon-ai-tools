@@ -151,11 +151,16 @@ export class WorkspaceGit {
 
   private async exec(agent: Agent, args: string[], token = "", cwd = agent.workspacePath) {
     assertGitAllowed(args);
-    const env: Record<string, string> = {};
+    const env: Record<string, string> = { GIT_TERMINAL_PROMPT: "0" };
+    // http.extraHeader is ignored by some git/curl builds; url.insteadOf reliably
+    // injects the PAT for https remotes without embedding it in stored remotes.
     if (token && (args[0] === "push" || args[0] === "clone" || args[0] === "fetch" || args[0] === "pull")) {
-      env.GIT_CONFIG_COUNT = "1";
-      env.GIT_CONFIG_KEY_0 = "http.extraHeader";
-      env.GIT_CONFIG_VALUE_0 = `AUTHORIZATION: bearer ${token}`;
+      const encoded = encodeURIComponent(token);
+      env.GIT_CONFIG_COUNT = "2";
+      env.GIT_CONFIG_KEY_0 = `url.https://x-access-token:${encoded}@github.com/.insteadOf`;
+      env.GIT_CONFIG_VALUE_0 = "https://github.com/";
+      env.GIT_CONFIG_KEY_1 = `url.https://oauth2:${encoded}@gitlab.com/.insteadOf`;
+      env.GIT_CONFIG_VALUE_1 = "https://gitlab.com/";
     }
     const result = await this.runtime.exec(agent.id, "git", args, {
       hostCwd: cwd,
@@ -163,7 +168,7 @@ export class WorkspaceGit {
       env,
     });
     if (process.env.LOG_GIT === "1") console.log(redactGitArgs(args).join(" "));
-    if ((args[0] === "clone" || args[0] === "push" || args[0] === "checkout" || args[0] === "init" || args[0] === "add") && result.code !== 0) {
+    if ((args[0] === "clone" || args[0] === "push" || args[0] === "fetch" || args[0] === "pull" || args[0] === "checkout" || args[0] === "init" || args[0] === "add") && result.code !== 0) {
       throw new Error(result.stderr.trim() || `git ${args[0]} failed`);
     }
     return result;

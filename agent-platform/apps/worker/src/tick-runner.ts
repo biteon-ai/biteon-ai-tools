@@ -45,6 +45,7 @@ export async function executeTick(input: {
   const now = input.now ?? new Date();
   await runtime.ensure(agent);
   const credentials = await readCredentials(input.store, agent, input.masterKey);
+  const gitToken = await readRepositoryToken(input.store, agent, input.masterKey, credentials.token);
   const board = createBoardClient({
     provider: agent.provider,
     boardId: agent.boardId,
@@ -85,11 +86,11 @@ export async function executeTick(input: {
     model: choice.model,
     executor: choice.executor,
     git: {
-      prepare: (current, task, owned) => gitClient.prepare(current, task, owned, credentials.token),
-      commitAndPush: (current, task, owned, message) => gitClient.commitAndPush(current, task, owned, message, credentials.token),
-    diff: (current) => gitClient.diff(current),
-    conflictCheck: (current, baseBranch) => gitClient.conflictCheck(current, baseBranch),
-  },
+      prepare: (current, task, owned) => gitClient.prepare(current, task, owned, gitToken),
+      commitAndPush: (current, task, owned, message) => gitClient.commitAndPush(current, task, owned, message, gitToken),
+      diff: (current) => gitClient.diff(current),
+      conflictCheck: (current, baseBranch) => gitClient.conflictCheck(current, baseBranch),
+    },
     notify: async (draft) => {
       const taskId = draft.taskTitle ? (await input.store.listTasks(agent.id)).find((task) => task.title === draft.taskTitle)?.id ?? null : null;
       await notify(input.store, agent.id, taskId, draft);
@@ -250,6 +251,20 @@ async function readCredentials(store: PlatformStore, agent: Agent, masterKey: st
   const secret = await store.getSecret(agent.credentialSecretId);
   if (!secret) return { key: "", token: "" };
   return parseCredentials(decryptSecret(secret, masterKey), agent.provider);
+}
+
+async function readRepositoryToken(store: PlatformStore, agent: Agent, masterKey: string, boardToken: string): Promise<string> {
+  if (agent.repositorySecretId) {
+    const secret = await store.getSecret(agent.repositorySecretId);
+    if (secret) {
+      const value = decryptSecret(secret, masterKey).trim();
+      if (value) return value;
+    }
+  }
+  const fromEnv = (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || process.env.GITLAB_TOKEN || "").trim();
+  if (fromEnv) return fromEnv;
+  if (agent.provider === "github_projects" && boardToken.trim()) return boardToken.trim();
+  return "";
 }
 
 async function notify(store: PlatformStore, agentId: string, taskId: string | null, draft: Parameters<typeof formatNotification>[0]) {

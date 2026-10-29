@@ -87,6 +87,11 @@ export function mergeCards(agentId: string, tasks: Task[], cards: ExternalCard[]
       }
       continue;
     }
+    // Keep local blocked/exception — board often still shows Doing, which would
+    // otherwise restart a stall/checkout failure loop every poll.
+    if (existing.stage === "blocked" || existing.stage === "exception") {
+      continue;
+    }
     if (existing.stage !== "done" && remote !== existing.stage) {
       existing.stage = remote;
     }
