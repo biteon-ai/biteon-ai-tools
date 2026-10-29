@@ -440,7 +440,7 @@ describe("provider model catalogs", () => {
   it("reads Cursor, OpenAI, and Ollama catalog shapes", () => {
     expect(readModelCatalog({ items: [{ id: "grok-4.7", displayName: "Grok 4.7" }, { id: "auto-smart", displayName: "Auto" }] })).toEqual([
       { id: "grok-4.7", displayName: "Grok 4.7" },
-      { id: "auto-smart", displayName: "Auto" },
+      { id: "default", displayName: "Auto" },
     ]);
     expect(readModelCatalog({ data: [{ id: "qwen2.5-coder" }, { id: "claude-sonnet", display_name: "Claude Sonnet" }] })).toEqual([
       { id: "qwen2.5-coder", displayName: "qwen2.5-coder" },

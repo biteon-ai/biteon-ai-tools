@@ -43,7 +43,7 @@ export function transitionTask(task: Task, to: Stage, ctx: TransitionContext = {
     stage: to,
     checksPassed: ctx.checksPassed ?? task.checksPassed,
     exceptionNote: ctx.exceptionNote ?? task.exceptionNote,
-    blockedReason: to === "blocked" ? ctx.reason ?? task.blockedReason : to === "doing" ? "" : task.blockedReason,
+    blockedReason: to === "blocked" ? ctx.reason ?? task.blockedReason : "",
     updatedAt: ctx.now ?? nowIso(),
   };
 }

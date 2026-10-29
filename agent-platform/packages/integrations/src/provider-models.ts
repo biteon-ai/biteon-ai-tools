@@ -17,11 +17,18 @@ export function readModelCatalog(payload: unknown): RemoteModel[] {
   const seen = new Set<string>();
   for (const row of catalogRows(payload)) {
     const id = textValue(row, ["id", "name", "model"]);
-    if (!id || seen.has(id.toLowerCase())) continue;
-    seen.add(id.toLowerCase());
-    models.push({ id, displayName: textValue(row, ["displayName", "display_name", "name", "id"]) || id });
+    if (!id) continue;
+    const normalized = normalizeCatalogModel(id, textValue(row, ["displayName", "display_name", "name", "id"]) || id);
+    if (seen.has(normalized.id.toLowerCase())) continue;
+    seen.add(normalized.id.toLowerCase());
+    models.push(normalized);
   }
   return models;
+}
+
+function normalizeCatalogModel(id: string, displayName: string): RemoteModel {
+  if (/^(auto-smart|cursor-auto)$/i.test(id)) return { id: "default", displayName: displayName || "Auto" };
+  return { id, displayName };
 }
 
 export async function listProviderModels(input: {

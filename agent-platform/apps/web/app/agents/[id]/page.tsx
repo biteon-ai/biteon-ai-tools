@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "../../../lib/api";
 import { appDateKey, formatAppDateTime } from "../../../lib/time";
@@ -71,9 +71,14 @@ function textToLabels(value: string): string[] {
 }
 
 const BOARD_COLUMNS = [
-  { stage: "backlog", label: "Backlog" },
-  { stage: "todo", label: "To Do" },
-  { stage: "doing", label: "Doing" },
+  { stage: "backlog", label: "Backlog", always: true },
+  { stage: "planning", label: "Planning", always: false },
+  { stage: "todo", label: "To Do", always: true },
+  { stage: "doing", label: "Doing", always: true },
+  { stage: "review", label: "Review", always: true },
+  { stage: "blocked", label: "Blocked", always: false },
+  { stage: "failed", label: "Failed", always: false },
+  { stage: "done", label: "Done", always: true },
 ] as const;
 
 function boardRank(value: number | undefined): number {
@@ -95,10 +100,9 @@ function orderedTicketRows<T extends { stage: string; boardPosition?: number; ti
 }
 
 function taskColumns(tasks: Detail["tasks"]) {
-  const known = new Set<string>(BOARD_COLUMNS.map((column) => column.stage));
-  const extras = [...new Set(tasks.map((task) => task.stage).filter((stage) => !known.has(stage) && (stage === "blocked" || stage === "failed")))]
-    .map((stage) => ({ stage, label: stage === "blocked" ? "Blocked" : "Failed" }));
-  return [...BOARD_COLUMNS, ...extras].map((column) => ({ ...column, tasks: byColumnOrder(tasks.filter((task) => task.stage === column.stage)) }));
+  return BOARD_COLUMNS
+    .filter((column) => column.always || tasks.some((task) => task.stage === column.stage))
+    .map((column) => ({ ...column, tasks: byColumnOrder(tasks.filter((task) => task.stage === column.stage)) }));
 }
 
 function estimateHours(task: Pick<Detail["tasks"][number], "estimateHours" | "description" | "acceptanceCriteria">): number {
@@ -174,6 +178,9 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
   const [ticketNote, setTicketNote] = useState<string | null>(null);
   const [shiftText, setShiftText] = useState<string | null>(null);
   const [custom, setCustom] = useState<{ text: string; reply: string } | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropStage, setDropStage] = useState<string | null>(null);
+  const dragMoved = useRef(false);
   const [config, setConfig] = useState({ name: "", description: "", provider: "none", boardName: "", boardId: "", repositoryUrl: "", repositoryName: "", linkedRepositories: [] as string[], defaultBranch: "develop", dailyCapacityHours: 8, allowOverCapacity: false, executorKind: "fake", telegramChatId: "", boardKey: "", boardToken: "", repositoryToken: "" });
   const [workflowConfig, setWorkflowConfig] = useState<WorkflowForm | null>(null);
   const [savingConfig, setSavingConfig] = useState(false);
@@ -434,6 +441,32 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
       );
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not update the task", "error");
+    } finally {
+      setPending("");
+    }
+  }
+
+  async function moveTask(taskId: string, stage: string, reason = "") {
+    if (!data) return;
+    const task = data.tasks.find((item) => item.id === taskId);
+    if (!task || task.stage === stage) return;
+    const previous = data.tasks;
+    setPending(`move:${taskId}`);
+    setData({
+      ...data,
+      tasks: data.tasks.map((item) => {
+        if (item.id === taskId) return { ...item, stage, blockedReason: stage === "blocked" ? item.blockedReason : "" };
+        if (stage === "doing" && item.stage === "doing" && item.id !== taskId) return { ...item, stage: "todo" };
+        return item;
+      }),
+    });
+    try {
+      await api(`/api/tasks/${taskId}/move`, { method: "POST", body: JSON.stringify({ stage, reason }) });
+      setData(await api<Detail>(`/api/agents/${id}`));
+      toast(`Moved “${task.title}” to ${stage}`, "success");
+    } catch (err) {
+      setData({ ...data, tasks: previous });
+      toast(err instanceof Error ? err.message : "Could not move the ticket", "error");
     } finally {
       setPending("");
     }
@@ -717,26 +750,87 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
       </section>
       <section className="card min-w-0 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-medium">Tasks</h2>
+          <div>
+            <h2 className="font-medium">Tasks</h2>
+            <p className="mt-1 text-xs text-slate-400">Drag tickets between columns to move or redo them. Dropping into Doing parks any other active ticket in To Do.</p>
+          </div>
           <button type="button" className="btn-ghost" aria-label="Sync Board" disabled={pending !== ""} onClick={() => void refreshBoard()}>{pending === "board" ? "Refreshing…" : "Refresh from Trello"}</button>
         </div>
         <div className="flex w-full min-w-0 gap-3 pb-2" style={{ overflowX: "auto" }}>
           {taskColumns(data.tasks).map((column) => (
-            <section key={column.stage} className="flex w-72 shrink-0 flex-col overflow-hidden rounded-lg border border-slate-800 bg-slate-950/50" aria-label={column.label}>
+            <section
+              key={column.stage}
+              className={`flex w-72 shrink-0 flex-col overflow-hidden rounded-lg border bg-slate-950/50 ${dropStage === column.stage ? "border-sky-500 ring-1 ring-sky-500/40" : "border-slate-800"}`}
+              aria-label={column.label}
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                setDropStage(column.stage);
+              }}
+              onDragLeave={() => setDropStage((current) => current === column.stage ? null : current)}
+              onDrop={(event) => {
+                event.preventDefault();
+                const taskId = event.dataTransfer.getData("text/task-id") || draggingId;
+                setDropStage(null);
+                setDraggingId(null);
+                if (taskId) void moveTask(taskId, column.stage);
+              }}
+            >
               <header className="flex items-center justify-between gap-2 border-b border-slate-800 px-3 py-2">
                 <h3 className="text-sm font-medium">{column.label}</h3>
                 <span className="rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-300">{column.tasks.length}</span>
               </header>
-              {column.tasks.length === 0 ? <p className="px-3 py-3 text-xs text-slate-500">None</p> : (
+              {column.tasks.length === 0 ? <p className="px-3 py-3 text-xs text-slate-500">Drop a ticket here</p> : (
                 <ul className="max-h-80 space-y-2 overflow-y-auto p-2">
                   {column.tasks.map((task) => (
                     <li key={task.id}>
-                      <button type="button" className="w-full rounded-lg border border-slate-800 bg-slate-900 p-3 text-left text-sm hover:border-slate-600" onClick={() => setSelectedId(task.id)}>
-                        <p className="font-medium leading-5">{task.title}</p>
-                        <p className="mt-1 text-xs text-slate-500">#{task.externalId}</p>
-                        {column.stage === "doing" ? <DoingMeter task={task} runs={data.runs} /> : null}
-                        {task.blockedReason ? <p className="mt-2 text-xs text-amber-300">{task.blockedReason}</p> : null}
-                      </button>
+                      <div
+                        draggable={pending === ""}
+                        onDragStart={(event) => {
+                          dragMoved.current = false;
+                          setDraggingId(task.id);
+                          event.dataTransfer.setData("text/task-id", task.id);
+                          event.dataTransfer.effectAllowed = "move";
+                        }}
+                        onDrag={(event) => {
+                          if (Math.abs(event.movementX) + Math.abs(event.movementY) > 0) dragMoved.current = true;
+                        }}
+                        onDragEnd={() => {
+                          setDraggingId(null);
+                          setDropStage(null);
+                        }}
+                        className={`rounded-lg border bg-slate-900 p-3 text-left text-sm ${draggingId === task.id ? "border-sky-500 opacity-70" : "border-slate-800 hover:border-slate-600"} ${pending === `move:${task.id}` ? "opacity-60" : ""}`}
+                      >
+                        <button
+                          type="button"
+                          className="w-full text-left"
+                          onClick={() => {
+                            if (dragMoved.current) {
+                              dragMoved.current = false;
+                              return;
+                            }
+                            setSelectedId(task.id);
+                          }}
+                        >
+                          <p className="font-medium leading-5">{task.title}</p>
+                          <p className="mt-1 text-xs text-slate-500">#{task.externalId}</p>
+                          {column.stage === "doing" ? <DoingMeter task={task} runs={data.runs} /> : null}
+                          {task.blockedReason ? <p className="mt-2 text-xs text-amber-300">{task.blockedReason}</p> : null}
+                        </button>
+                        {column.stage === "blocked" || column.stage === "failed" ? (
+                          <button
+                            type="button"
+                            className="btn-ghost mt-2 w-full justify-center text-xs"
+                            disabled={pending !== ""}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void moveTask(task.id, "todo", "Redone from the board");
+                            }}
+                          >
+                            {pending === `move:${task.id}` ? "Moving…" : "Redo → To Do"}
+                          </button>
+                        ) : null}
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -816,6 +910,12 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
             {selected.stage === "doing" ? <div className="mb-4"><DoingMeter task={selected} runs={data.runs} /></div> : null}
             {selected.description ? <p className="mb-4 whitespace-pre-wrap text-sm text-slate-300">{selected.description}</p> : null}
             {selected.blockedReason ? <p className="mb-4 text-sm text-amber-300">{selected.blockedReason}</p> : null}
+            {selected.stage === "blocked" || selected.stage === "failed" ? (
+              <div className="mb-4 grid gap-2 sm:grid-cols-2">
+                <button type="button" className="btn" disabled={pending !== ""} onClick={() => void moveTask(selected.id, "todo", "Redone from the board").then(() => setSelectedId(null))}>{pending === `move:${selected.id}` ? "Moving…" : "Redo → To Do"}</button>
+                <button type="button" className="btn-ghost" disabled={pending !== ""} onClick={() => void moveTask(selected.id, "doing", "Redone from the board").then(() => setSelectedId(null))}>{pending === `move:${selected.id}` ? "Moving…" : "Redo → Doing"}</button>
+              </div>
+            ) : null}
             {selected.stage === "review" ? (
               <div className="space-y-3 text-sm">
                 <p><span className="text-slate-400">Branch</span><br /><span className="font-medium">{selected.branchName || "Not created yet"}</span></p>

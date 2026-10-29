@@ -13,6 +13,7 @@ import {
   MEMORY_KINDS,
   PROVIDER_TYPES,
   SKILLS,
+  STAGES,
   TASK_PROVIDERS,
   defaultAgentName,
   defaultRules,
@@ -21,6 +22,7 @@ import {
   nowIso,
   type Agent,
   type ProviderRecord,
+  type Stage,
   type StoredSecret,
   type Task,
 } from "@agent-platform/shared";
@@ -61,6 +63,7 @@ import {
   secretHint,
   sessionCookie,
   signSession,
+  transitionTask,
   verifyPassword,
   verifySession,
   type PlatformEnv,
@@ -680,6 +683,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   app.post("/api/tasks/:id/approve", async (request, reply) => decide(deps, request, reply, "approved"));
   app.post("/api/tasks/:id/reject", async (request, reply) => decide(deps, request, reply, "rejected"));
+  app.post("/api/tasks/:id/move", async (request, reply) => moveTask(deps, request, reply));
 
   app.get("/api/providers", async () => {
     const providers = await deps.store.listProviders();
@@ -1145,6 +1149,70 @@ async function credentialsFor(deps: ServerDeps, agent: Agent): Promise<{ key: st
   const secret = await deps.store.getSecret(agent.credentialSecretId);
   if (!secret) return { key: "", token: "" };
   return parseCredentials(decryptSecret(secret, deps.env.APP_MASTER_KEY), agent.provider);
+}
+
+async function moveTask(deps: ServerDeps, request: FastifyRequest, reply: FastifyReply) {
+  const task = await deps.store.getTask(idParam(request));
+  if (!task) return reply.code(404).send({ error: "task not found" });
+  const body = z.object({
+    stage: z.enum(STAGES),
+    reason: z.string().default(""),
+  }).parse(request.body ?? {});
+  if (task.stage === body.stage) return { task, moved: false };
+  const now = nowIso();
+  const ctx = {
+    now,
+    reason: body.reason || (body.stage === "blocked" ? "Moved to Blocked on the board." : undefined),
+    checksPassed: body.stage === "review" ? true : undefined,
+    exceptionNote: body.stage === "review" && !task.checksPassed ? "Moved to Review from the board." : undefined,
+    approval: body.stage === "done",
+  };
+  let next: Task;
+  try {
+    next = transitionTask(task, body.stage as Stage, ctx);
+  } catch (error) {
+    if (error instanceof WorkflowError) return reply.code(409).send({ error: error.message });
+    throw error;
+  }
+  const siblings = await deps.store.listTasks(task.agentId);
+  const demoted: Task[] = [];
+  if (next.stage === "doing") {
+    for (const sibling of siblings) {
+      if (sibling.id === next.id || sibling.stage !== "doing") continue;
+      const parked = transitionTask(sibling, "todo", { now });
+      demoted.push(parked);
+      await deps.store.saveTask(parked);
+    }
+  }
+  await deps.store.saveTask(next);
+  const agent = await deps.store.getAgent(task.agentId);
+  const workflow = agent ? await deps.store.getWorkflow(agent.id) : null;
+  if (agent && workflow) {
+    const board = createBoardClient({
+      provider: agent.provider,
+      boardId: agent.boardId,
+      credentials: await credentialsFor(deps, agent),
+      fetchImpl: deps.fetchImpl,
+    });
+    for (const item of [...demoted, next]) {
+      const column = columnForStage(workflow.columns, item.stage);
+      if (board && column) await board.moveCard(item.externalId, column).catch(() => undefined);
+    }
+  }
+  if (agent?.status === "running" && (next.stage === "doing" || next.stage === "todo")) {
+    await deps.queue.enqueue(agent.id);
+  }
+  await deps.store.addEvent({
+    id: newId(),
+    agentId: task.agentId,
+    taskId: task.id,
+    kind: "task",
+    message: `Moved ${task.title} from ${task.stage} to ${next.stage}`,
+    metadata: { from: task.stage, to: next.stage },
+    createdAt: now,
+  });
+  await audit(deps, request.userId, "task.moved", task.id);
+  return { task: next, demoted, moved: true };
 }
 
 async function decide(deps: ServerDeps, request: FastifyRequest, reply: FastifyReply, decision: "approved" | "rejected") {

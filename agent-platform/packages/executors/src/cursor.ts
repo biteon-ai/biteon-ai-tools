@@ -37,7 +37,7 @@ export class CursorSdkExecutor implements CodeExecutor {
     try {
       const agent = await sdk.Agent.create({
         apiKey: input.model.apiKey,
-        model: { id: input.model.modelId },
+        model: { id: cursorModelId(input.model.modelId) },
         local: { cwd: input.workspaceDir, settingSources: [] },
       });
       try {
@@ -76,4 +76,11 @@ function failed(input: ExecutorRun, error: string, note = error): ExecutorResult
     checkpoint: input.checkpoint,
     error: note,
   };
+}
+
+/** Cursor SDK model ids differ from some catalog aliases (e.g. auto-smart → default). */
+function cursorModelId(modelId: string): string {
+  const trimmed = modelId.trim();
+  if (!trimmed || /^(auto|auto-smart|cursor-auto)$/i.test(trimmed)) return "default";
+  return trimmed;
 }
