@@ -1,6 +1,6 @@
-import type { AgentRules, Memory, Task } from "@agent-platform/shared";
+import type { AgentRules, CustomSkill, Memory, Task } from "@agent-platform/shared";
 import type { Checkout } from "./repositories.js";
-import { SKILLS, skillEnabled } from "@agent-platform/shared";
+import { SKILLS, SKILL_RUN_ORDER, skillEnabled } from "@agent-platform/shared";
 
 const SPECKIT_STEPS = [
   "speckit.constitution, only when the project has no constitution yet.",
@@ -14,17 +14,47 @@ const SPECKIT_STEPS = [
   "speckit.converge, only when the code drifted from the spec.",
 ];
 
+function grillMeInstructions(skills: Record<string, boolean>): string[] {
+  if (!skillEnabled(skills, "grill-me")) {
+    return ["Grill-me is turned off for this agent. Do not run a grilling pass before Speckit or coding."];
+  }
+  return [
+    "Grill-me is on (https://www.aihero.dev/skills-grill-me). Run it first, before Speckit or coding:",
+    "1. Treat this ticket as a plan to stress-test until the decision tree for this ticket is settled.",
+    "2. Walk each branch in dependency order: settle parent decisions before dependents. Never ask or invent a dependent choice first.",
+    "3. Prefer answering from the codebase over guessing. If the repo already answers a question, read it instead of inventing a requirement.",
+    "4. For each open decision, state the question and your recommended answer grounded in the ticket, acceptance criteria, and repository.",
+    "5. Do not invent product scope the ticket and acceptance criteria do not support.",
+    "6. If a decision is ungrillable without a prototype, note it and continue with the smallest safe default that still matches the ticket.",
+    "7. Record settled decisions in Speckit specify/plan output, or in a short plan note when Speckit is off.",
+    "8. Only after grilling is complete, continue to Speckit (when enabled) and then the remaining skills in the listed order.",
+  ];
+}
+
 function speckitInstructions(skills: Record<string, boolean>): string[] {
   if (!skillEnabled(skills, "speckit")) {
     return ["Speckit is turned off for this agent. Plan the change, implement only what the task requires, and leave validation to the platform."];
   }
   return [
-    "Speckit is on. Follow these commands in this order, using the repository Speckit skills when .cursor/skills or .specify is present:",
+    "Speckit is on. After Grill-me (when enabled), follow these commands in this exact order, using the repository Speckit skills when .cursor/skills or .specify is present:",
     ...SPECKIT_STEPS.map((instruction, index) => `${index + 1}. ${instruction}`),
     "Do not run speckit.taskstoissues. The ticket already exists on the board.",
     "Do not start speckit.implement until specify, plan, and tasks exist for this ticket.",
     "Leave validation to the platform.",
   ];
+}
+
+function orderedEnabledSkills(rules: AgentRules): { id: string; name: string; description: string }[] {
+  const custom = rules.customSkills ?? [];
+  const builtin = SKILL_RUN_ORDER
+    .map((id) => SKILLS.find((skill) => skill.id === id))
+    .filter((skill): skill is NonNullable<typeof skill> => Boolean(skill))
+    .filter((skill) => skillEnabled(rules.skills, skill.id))
+    .map((skill) => ({ id: skill.id, name: skill.name, description: skill.description }));
+  const customEnabled = custom
+    .filter((skill: CustomSkill) => rules.skills[skill.id])
+    .map((skill) => ({ id: skill.id, name: skill.name, description: skill.description }));
+  return [...builtin, ...customEnabled];
 }
 
 export function wrapUntrusted(label: string, content: string): string {
@@ -45,11 +75,10 @@ export function buildTaskPrompt(input: {
   rules: AgentRules;
   checkouts?: Checkout[];
 }): string {
-  const custom = input.rules.customSkills ?? [];
-  const skillNotes = [
-    ...SKILLS.filter((skill) => skillEnabled(input.rules.skills, skill.id)).map((skill) => `- ${skill.name}: ${skill.description}`),
-    ...custom.filter((skill) => input.rules.skills[skill.id]).map((skill) => `- ${skill.name}: ${skill.description}`),
-  ].join("\n");
+  const enabledSkills = orderedEnabledSkills(input.rules);
+  const skillNotes = enabledSkills
+    .map((skill, index) => `${index + 1}. ${skill.name}: ${skill.description}`)
+    .join("\n");
   const memoryNotes = input.memories
     .map((memory) => `- [${memory.kind}] ${memory.title}: ${memory.body}`)
     .join("\n");
@@ -66,6 +95,8 @@ export function buildTaskPrompt(input: {
     `Agent: ${input.agentName}`,
     ...layout,
     "The workspace already contains the latest base branch. Read that code before writing anything.",
+    "Run enabled skills in the numbered order below. Do not shuffle, skip ahead, or pick skills at random.",
+    ...grillMeInstructions(input.rules.skills),
     ...speckitInstructions(input.rules.skills),
     "Do not claim the task is done. Do not move workflow state.",
     "",
@@ -76,7 +107,7 @@ export function buildTaskPrompt(input: {
     "Git workflow:",
     input.rules.instructions || "Before Review, run a Git conflict dry-run against the base branch and stop if it conflicts. Never execute git merge develop. Never auto-merge a pull request. A merge is allowed only after a human approval from the UI or Telegram /approve is stored for the task.",
     "",
-    "Enabled skills:",
+    "Enabled skills (fixed order):",
     skillNotes || "- none",
     "",
     "Project memory (verify against the repository before relying on it):",

@@ -111,6 +111,13 @@ export interface SkillDefinition {
 }
 
 export const SKILLS: SkillDefinition[] = [
+  {
+    id: "grill-me",
+    name: "Grill-me",
+    description: "Before Speckit or coding, stress-test the ticket like /grill-me (aihero.dev/skills-grill-me): walk the decision tree, prefer codebase answers, recommend an answer for each open decision, and record settled choices before implement.",
+    defaultEnabled: true,
+  },
+  { id: "speckit", name: "Speckit", description: "For every ticket, run speckit.constitution, speckit.specify, speckit.clarify, speckit.plan, speckit.tasks, speckit.analyze, speckit.checklist, speckit.implement, and speckit.converge in that order.", defaultEnabled: true },
   { id: "security-audit", name: "Security audit", description: "Review diffs for common injection, auth, and unsafe execution patterns.", defaultEnabled: true },
   { id: "secrets-scan", name: "Secrets detection", description: "Block review when a diff contains credential material.", defaultEnabled: true },
   { id: "dependency-review", name: "Dependency review", description: "Flag changes to dependency manifests.", defaultEnabled: true },
@@ -123,8 +130,10 @@ export const SKILLS: SkillDefinition[] = [
   { id: "migration-review", name: "Migration review", description: "Flag database migration files for human attention.", defaultEnabled: true },
   { id: "cicd-validation", name: "CI/CD validation", description: "Treat pipeline config changes as review notes.", defaultEnabled: true },
   { id: "threat-model", name: "Threat modeling", description: "Ask the executor to record abuse cases for security-sensitive changes.", defaultEnabled: false },
-  { id: "speckit", name: "Speckit", description: "For every ticket, run speckit.constitution, speckit.specify, speckit.clarify, speckit.plan, speckit.tasks, speckit.analyze, speckit.checklist, speckit.implement, and speckit.converge in that order.", defaultEnabled: true },
 ];
+
+/** Fixed execution order for built-in skills. Custom skills run after these, in the order they were added. */
+export const SKILL_RUN_ORDER = SKILLS.map((skill) => skill.id);
 
 export function skillEnabled(skills: Record<string, boolean> | undefined, id: string): boolean {
   const value = skills?.[id];

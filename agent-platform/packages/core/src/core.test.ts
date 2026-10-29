@@ -658,6 +658,11 @@ describe("linked repositories", () => {
     expect(prompt).toContain("repo-primary");
     expect(prompt).toContain("repo-secondary");
     expect(prompt).toContain("One pull request is opened per repository");
+    expect(prompt).toContain("Run enabled skills in the numbered order below");
+    expect(prompt).toContain("Grill-me is on");
+    expect(prompt).toContain("Enabled skills (fixed order):");
+    expect(prompt).toContain("1. Grill-me:");
+    expect(prompt).toContain("2. Speckit:");
     expect(prompt).toContain("speckit.specify");
     expect(prompt).toContain("speckit.plan");
     expect(prompt).toContain("speckit.tasks");
@@ -674,6 +679,7 @@ describe("linked repositories", () => {
     });
     expect(skipped).toContain("Speckit is turned off");
     expect(skipped).not.toContain("speckit.specify");
+    expect(skipped).toContain("Grill-me is on");
   });
 });
 

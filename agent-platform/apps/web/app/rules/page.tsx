@@ -23,6 +23,8 @@ interface Rules {
 interface Skill { id: string; name: string; description: string; defaultEnabled?: boolean }
 
 const ICONS: Record<string, IconName> = {
+  "grill-me": "target",
+  speckit: "spark",
   "security-audit": "shield",
   "secrets-scan": "key",
   "dependency-review": "boxes",
@@ -35,8 +37,9 @@ const ICONS: Record<string, IconName> = {
   "migration-review": "database",
   "cicd-validation": "workflow",
   "threat-model": "target",
-  speckit: "spark",
 };
+
+const WORKFLOW_SKILL_IDS = new Set(["grill-me", "speckit"]);
 
 function skillOn(rules: Rules, skill: Skill): boolean {
   const value = rules.skills[skill.id];
@@ -48,14 +51,18 @@ const DEFAULT_STANDARDS = "Follow SOLID where it matches the codebase. Prefer th
 const DEFAULT_TESTS = "Run the configured validation commands. Add or update tests when behavior changes. Each command must exit 0 before Review. A failing command blocks the pull request. Empty validation is not allowed.";
 const DEFAULT_WORKFLOW = "Before Review, run a Git conflict dry-run against the base branch and stop if it conflicts. Never execute git merge develop. Never auto-merge a pull request. A merge is allowed only after a human approval from the UI or Telegram /approve is stored for the task.";
 
-function SkillSwitches({ rules, skills, onChange, onRemove }: { rules: Rules; skills: Skill[]; onChange: (rules: Rules) => void; onRemove: (skill: Skill) => void }) {
+function SkillSwitches({ rules, skills, onChange, onRemove, startAt = 1 }: { rules: Rules; skills: Skill[]; onChange: (rules: Rules) => void; onRemove: (skill: Skill) => void; startAt?: number }) {
   return (
     <div className="grid gap-3 md:grid-cols-2">
-      {skills.map((skill) => {
+      {skills.map((skill, index) => {
         const enabled = skillOn(rules, skill);
         const customSkill = (rules.customSkills ?? []).some((item) => item.id === skill.id);
+        const order = startAt + index;
         return (
           <article key={skill.id} className={`card flex items-start gap-3 p-4 transition ${enabled ? "border-sky-500/40" : "hover:border-slate-700"}`}>
+            <span className={`mt-0.5 rounded-lg border border-slate-800 px-2 py-1 text-xs font-semibold ${enabled ? "text-sky-300" : "text-slate-500"}`} aria-label={`Run order ${order}`}>
+              {order}
+            </span>
             <span className={`mt-0.5 rounded-lg border border-slate-800 p-2 ${enabled ? "text-sky-300" : "text-slate-400"}`}>
               <Icon name={ICONS[skill.id] ?? "spark"} />
             </span>
@@ -229,26 +236,35 @@ export default function RulesPage() {
         <span>Allow review when no validation commands are configured</span>
         <Toggle checked={rules.allowEmptyChecks} label="Allow review when no validation commands are configured" onChange={(allowEmptyChecks) => setRules({ ...rules, allowEmptyChecks })} />
       </label>
-      {skills.filter((skill) => skill.id === "speckit").map((skill) => {
-        const enabled = skillOn(rules, skill);
-        return (
-          <article key={skill.id} className={`card flex items-start gap-3 p-4 ${enabled ? "border-sky-500/40" : ""}`}>
-            <span className={`mt-0.5 rounded-lg border border-slate-800 p-2 ${enabled ? "text-sky-300" : "text-slate-400"}`}>
-              <Icon name="spark" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <h2 className="font-medium">Speckit</h2>
-              <p className="mt-1 text-sm text-slate-400">{skill.description}</p>
-            </div>
-            <Toggle checked={enabled} label="Speckit" onChange={(value) => {
-              const next: Record<string, boolean> = { ...rules.skills, speckit: value };
-              for (const key of Object.keys(next)) if (key.startsWith("speckit-")) delete next[key];
-              setRules({ ...rules, skills: next });
-            }} />
-          </article>
-        );
-      })}
-      <SkillSwitches rules={rules} skills={[...skills.filter((skill) => skill.id !== "speckit"), ...(rules.customSkills ?? [])]} onChange={setRules} onRemove={removeCustomSkill} />
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-sm font-medium text-slate-300">Workflow skills (fixed order)</h2>
+          <p className="mt-1 text-sm text-slate-400">The agent runs enabled skills in this numbered order every ticket. Grill-me first, then Speckit, then quality skills. It does not pick them at random.</p>
+        </div>
+        <SkillSwitches
+          rules={rules}
+          skills={skills.filter((skill) => WORKFLOW_SKILL_IDS.has(skill.id))}
+          onChange={(next) => {
+            const skillsNext: Record<string, boolean> = { ...next.skills };
+            if (!skillsNext.speckit) {
+              for (const key of Object.keys(skillsNext)) if (key.startsWith("speckit-")) delete skillsNext[key];
+            }
+            setRules({ ...next, skills: skillsNext });
+          }}
+          onRemove={removeCustomSkill}
+          startAt={1}
+        />
+      </section>
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-slate-300">Quality skills (after workflow)</h2>
+        <SkillSwitches
+          rules={rules}
+          skills={[...skills.filter((skill) => !WORKFLOW_SKILL_IDS.has(skill.id)), ...(rules.customSkills ?? [])]}
+          onChange={setRules}
+          onRemove={removeCustomSkill}
+          startAt={1 + skills.filter((skill) => WORKFLOW_SKILL_IDS.has(skill.id)).length}
+        />
+      </section>
       <div className="card grid gap-2 p-4 md:grid-cols-[1fr_2fr_auto]">
         <input className="input" aria-label="Custom skill name" placeholder="Skill name" value={custom.name} onChange={(event) => setCustom({ ...custom, name: event.target.value })} />
         <input className="input" aria-label="Custom skill description" placeholder="What should the agent do with this skill?" value={custom.description} onChange={(event) => setCustom({ ...custom, description: event.target.value })} />
