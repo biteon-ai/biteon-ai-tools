@@ -1,5 +1,9 @@
 # Operations
 
+## Timezone
+
+Containers and day budgets use `Europe/Amsterdam` (`TZ`). Timestamps stay stored in UTC; the UI and capacity windows convert to Amsterdam wall time.
+
 ## Health
 
 - API: `GET /health` and `GET /ready` (ready requires Postgres)

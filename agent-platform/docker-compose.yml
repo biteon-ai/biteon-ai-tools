@@ -1,9 +1,14 @@
 name: agent-platform
 
+x-timezone: &timezone
+  TZ: ${TZ:-Europe/Amsterdam}
+
 services:
   postgres:
     image: postgres:16-alpine
     environment:
+      <<: *timezone
+      PGTZ: ${TZ:-Europe/Amsterdam}
       POSTGRES_USER: ${POSTGRES_USER:-agent}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-now}
       POSTGRES_DB: ${POSTGRES_DB:-agent_platform}
@@ -22,6 +27,8 @@ services:
 
   redis:
     image: redis:7-alpine
+    environment:
+      <<: *timezone
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -39,6 +46,7 @@ services:
       target: api
     env_file: .env
     environment:
+      <<: *timezone
       DATABASE_URL: postgres://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-change-me-now}@postgres:5432/${POSTGRES_DB:-agent_platform}
       REDIS_URL: redis://redis:6379
     volumes:
@@ -66,6 +74,7 @@ services:
       target: worker
     env_file: .env
     environment:
+      <<: *timezone
       DATABASE_URL: postgres://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-change-me-now}@postgres:5432/${POSTGRES_DB:-agent_platform}
       REDIS_URL: redis://redis:6379
     volumes:
@@ -93,6 +102,7 @@ services:
       dockerfile: docker/Dockerfile
       target: web
     environment:
+      <<: *timezone
       API_INTERNAL_URL: http://api:4000
     ports:
       - "${WEB_PORT:-3000}:3000"

@@ -1,4 +1,5 @@
 import type { ColumnMap, Stage, Task } from "@agent-platform/shared";
+import { startOfAppDay } from "./timezone.js";
 
 export function estimateHours(task: Pick<Task, "description" | "acceptanceCriteria" | "estimateHours">): number {
   if (task.estimateHours && task.estimateHours > 0) return task.estimateHours;
@@ -8,12 +9,8 @@ export function estimateHours(task: Pick<Task, "description" | "acceptanceCriter
   return 2;
 }
 
-export function startOfUtcDay(now: Date): Date {
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-}
-
 export function remainingCapacity(dailyHours: number, tasks: Task[], now: Date): number {
-  const start = startOfUtcDay(now).getTime();
+  const start = startOfAppDay(now).getTime();
   const used = tasks.reduce((sum, task) => {
     const open = task.stage === "todo" || task.stage === "doing";
     const finishedToday = (task.stage === "review" || task.stage === "done") && Date.parse(task.updatedAt) >= start && !importedBeforeWork(task);

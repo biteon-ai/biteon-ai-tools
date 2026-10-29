@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "../../../lib/api";
+import { appDateKey, formatAppDateTime } from "../../../lib/time";
 import { useToast } from "../../../components/Toast";
 import { Icon } from "../../../components/Icons";
 import { Chip, StatusBadge } from "../../../components/ui";
@@ -773,7 +774,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
             </label>
           </div>
           {(() => {
-            const lines = data.events.filter((event, index, all) => event.message !== all[index - 1]?.message).filter((event) => !logDate || event.createdAt.slice(0, 10) === logDate);
+            const lines = data.events.filter((event, index, all) => event.message !== all[index - 1]?.message).filter((event) => !logDate || appDateKey(event.createdAt) === logDate);
             const visible = lines.slice(0, logLimit);
             if (lines.length === 0) return <p className="text-sm text-slate-400">{logDate ? "No log lines on that date." : "No log lines yet."}</p>;
             return (
@@ -783,7 +784,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
                   const long = event.message.length > 180;
                   return (
                     <p key={event.id} className="text-sm text-slate-300">
-                      <span className="text-slate-500">{event.createdAt.slice(0, 16).replace("T", " ")}</span>
+                      <span className="text-slate-500">{formatAppDateTime(event.createdAt)}</span>
                       {" · "}
                       {open || !long ? event.message : `${event.message.slice(0, 180)}…`}
                       {long ? <button type="button" className="ml-2 text-sky-300" onClick={() => setOpenLogIds((current) => ({ ...current, [event.id]: !open }))}>{open ? "See less" : "See more"}</button> : null}

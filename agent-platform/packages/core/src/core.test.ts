@@ -53,6 +53,7 @@ import {
   runAgentTick,
   secretHint,
   selectTasksForCapacity,
+  startOfUtcDay,
   shiftToTicket,
   transitionTask,
   verifyPassword,
@@ -183,6 +184,13 @@ describe("secrets and redaction", () => {
 });
 
 describe("planning", () => {
+  it("starts the Amsterdam calendar day for capacity and budgets", () => {
+    // 23:30 CET on 15 Jan → day starts at 00:00 CET = 23:00 UTC on 14 Jan
+    expect(startOfUtcDay(new Date("2026-01-15T22:30:00.000Z")).toISOString()).toBe("2026-01-14T23:00:00.000Z");
+    // 23:30 CEST on 15 Jul → day starts at 00:00 CEST = 22:00 UTC on 14 Jul
+    expect(startOfUtcDay(new Date("2026-07-15T21:30:00.000Z")).toISOString()).toBe("2026-07-14T22:00:00.000Z");
+  });
+
   it("keeps work inside the remaining daily capacity unless explicitly allowed", () => {
     const small = task({ id: "a", externalId: "a", estimateHours: 3, priority: 2 });
     const large = task({ id: "b", externalId: "b", estimateHours: 8, priority: 1 });
