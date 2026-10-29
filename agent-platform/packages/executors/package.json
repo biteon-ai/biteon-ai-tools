@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@agent-platform/core": "workspace:*",
-    "@agent-platform/shared": "workspace:*"
+    "@agent-platform/shared": "workspace:*",
+    "@cursor/sdk": "^1.2.0"
   }
 }
