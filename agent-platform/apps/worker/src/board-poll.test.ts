@@ -29,6 +29,7 @@ describe("trello board poll", () => {
       dailyCapacityHours: 8,
       allowOverCapacity: false,
       credentialSecretId: secretId,
+    repositorySecretId: null,
       telegramChatId: "",
       rules: { ...defaultRules(), allowEmptyChecks: true, validationCommands: [] },
       createdAt: nowIso(),

@@ -25,6 +25,13 @@ interface AgentRecord {
   telegramChatId?: string;
   workspacePath: string;
   credential?: { configured: boolean; hint: string };
+  repositoryCredential?: { configured: boolean; hint: string };
+}
+
+interface GithubRepoOption {
+  fullName: string;
+  htmlUrl: string;
+  defaultBranch: string;
 }
 interface WorkflowRecord {
   columns: { backlog: string; planning: string; todo: string; doing: string; review: string; done: string };
@@ -166,10 +173,13 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
   const [ticketNote, setTicketNote] = useState<string | null>(null);
   const [shiftText, setShiftText] = useState<string | null>(null);
   const [custom, setCustom] = useState<{ text: string; reply: string } | null>(null);
-  const [config, setConfig] = useState({ name: "", description: "", provider: "none", boardName: "", boardId: "", repositoryUrl: "", repositoryName: "", linkedRepositories: [] as string[], defaultBranch: "develop", dailyCapacityHours: 8, allowOverCapacity: false, executorKind: "fake", telegramChatId: "", boardKey: "", boardToken: "" });
+  const [config, setConfig] = useState({ name: "", description: "", provider: "none", boardName: "", boardId: "", repositoryUrl: "", repositoryName: "", linkedRepositories: [] as string[], defaultBranch: "develop", dailyCapacityHours: 8, allowOverCapacity: false, executorKind: "fake", telegramChatId: "", boardKey: "", boardToken: "", repositoryToken: "" });
   const [workflowConfig, setWorkflowConfig] = useState<WorkflowForm | null>(null);
   const [savingConfig, setSavingConfig] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
+  const [connectingGithub, setConnectingGithub] = useState(false);
+  const [githubAccount, setGithubAccount] = useState<{ login: string; name: string | null } | null>(null);
+  const [githubRepos, setGithubRepos] = useState<GithubRepoOption[]>([]);
   const [showMemoryHelp, setShowMemoryHelp] = useState(false);
   const [logDate, setLogDate] = useState("");
   const [logLimit, setLogLimit] = useState(5);
@@ -199,7 +209,10 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
         telegramChatId: agent.telegramChatId ?? "",
         boardKey: "",
         boardToken: "",
+        repositoryToken: "",
       });
+      setGithubAccount(null);
+      setGithubRepos([]);
       setWorkflowConfig(detail.workflow ? {
         columns: detail.workflow.columns,
         maxTasksPerDay: detail.workflow.selection.maxTasksPerDay,
@@ -294,8 +307,60 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
+  async function connectGithub() {
+    const token = config.repositoryToken.trim();
+    if (!token) {
+      toast("Enter a GitHub personal access token to connect the account", "warning");
+      return;
+    }
+    setConnectingGithub(true);
+    try {
+      const result = await api<{ account: { login: string; name: string | null }; repositories: GithubRepoOption[] }>("/api/integrations/github/account", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      });
+      setGithubAccount(result.account);
+      setGithubRepos(result.repositories);
+      if (!config.repositoryName && result.repositories[0]) {
+        const first = result.repositories[0];
+        setConfig((current) => ({
+          ...current,
+          repositoryName: first.fullName,
+          repositoryUrl: first.htmlUrl,
+          defaultBranch: current.defaultBranch || first.defaultBranch,
+        }));
+      }
+      toast(`Connected GitHub account @${result.account.login}`, "success");
+    } catch (err) {
+      setGithubAccount(null);
+      setGithubRepos([]);
+      toast(err instanceof Error ? err.message : "Could not connect the GitHub account", "error");
+    } finally {
+      setConnectingGithub(false);
+    }
+  }
+
+  function selectPrimaryRepository(fullName: string) {
+    const selected = githubRepos.find((item) => item.fullName === fullName);
+    setConfig((current) => ({
+      ...current,
+      repositoryName: fullName,
+      repositoryUrl: selected?.htmlUrl ?? current.repositoryUrl,
+      defaultBranch: selected?.defaultBranch || current.defaultBranch,
+      linkedRepositories: current.linkedRepositories.filter((item) => item.trim().toLowerCase() !== fullName.toLowerCase()),
+    }));
+  }
+
   async function saveConfig(event: React.FormEvent) {
     event.preventDefault();
+    if (!config.repositoryName.trim() && !config.repositoryUrl.trim()) {
+      toast("A primary repository name or URL is required", "warning");
+      return;
+    }
+    if (!config.repositoryToken.trim() && !data?.agent.repositoryCredential?.configured) {
+      toast("Connect and authenticate a GitHub account for the repository", "warning");
+      return;
+    }
     setSavingConfig(true);
     try {
       await api(`/api/agents/${id}`, {
@@ -316,6 +381,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
           telegramChatId: config.telegramChatId,
           boardKey: config.boardKey || undefined,
           boardToken: config.boardToken || undefined,
+          repositoryToken: config.repositoryToken || undefined,
         }),
       });
       if (workflowConfig) {
@@ -340,6 +406,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
         linkedRepositories: next.agent.linkedRepositories ?? [],
         boardKey: "",
         boardToken: "",
+        repositoryToken: "",
       }));
       toast("Agent configuration saved", "success");
     } catch (err) {
@@ -409,109 +476,208 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
           <Icon name="chevron" className={`h-4 w-4 text-slate-400 transition ${showConfig ? "rotate-180" : ""}`} />
         </button>
       {showConfig ? (
-      <form id="agent-configuration" onSubmit={saveConfig} className="mt-3 space-y-3">
-        <p className="text-sm text-slate-400">{data.agent.credential?.configured ? `Board credential saved ${data.agent.credential.hint}. Leave the key and token blank to keep them.` : "No board credential is saved yet."}</p>
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="block text-sm text-slate-300">Name
-            <input className="input mt-1" aria-label="Name" value={config.name} onChange={(event) => setConfig({ ...config, name: event.target.value })} />
-          </label>
-          <label className="block text-sm text-slate-300">Description
-            <input className="input mt-1" aria-label="Description" value={config.description} onChange={(event) => setConfig({ ...config, description: event.target.value })} />
-          </label>
-          <label className="block text-sm text-slate-300">Provider
-            <select className="input mt-1" aria-label="Provider" value={config.provider} onChange={(event) => setConfig({ ...config, provider: event.target.value })}>
-              <option value="none">None</option>
-              <option value="trello">Trello</option>
-              <option value="github_projects">GitHub Projects</option>
-            </select>
-          </label>
-          <label className="block text-sm text-slate-300">Executor
-            <select className="input mt-1" aria-label="Executor" value={config.executorKind} onChange={(event) => setConfig({ ...config, executorKind: event.target.value })}>
-              <option value="fake">Fake (no model calls)</option>
-              <option value="llm">Model router</option>
-              <option value="cursor">Cursor</option>
-              <option value="codex">Codex</option>
-            </select>
-          </label>
-          <label className="block text-sm text-slate-300">Board name
-            <input className="input mt-1" aria-label="Board name" value={config.boardName} onChange={(event) => setConfig({ ...config, boardName: event.target.value })} />
-          </label>
-          <label className="block text-sm text-slate-300">Board id
-            <input className="input mt-1" aria-label="Board id" value={config.boardId} onChange={(event) => setConfig({ ...config, boardId: event.target.value })} />
-          </label>
-          <label className="block text-sm text-slate-300">Repository URL
-            <input className="input mt-1" aria-label="Repository URL" value={config.repositoryUrl} onChange={(event) => setConfig({ ...config, repositoryUrl: event.target.value })} />
-          </label>
-          <label className="block text-sm text-slate-300">Repository
-            <input className="input mt-1" aria-label="Repository" value={config.repositoryName} onChange={(event) => setConfig({ ...config, repositoryName: event.target.value })} />
-          </label>
-          <fieldset className="space-y-2 md:col-span-2">
-            <legend className="text-sm text-slate-300">Linked repositories</legend>
+      <form id="agent-configuration" onSubmit={saveConfig} className="mt-4 space-y-4">
+        <section className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+          <header className="space-y-1 border-b border-slate-800 pb-3">
+            <h3 className="text-sm font-semibold text-slate-100">1. Agent</h3>
+            <p className="text-sm text-slate-400">Name, summary, and how this agent runs work.</p>
+          </header>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block text-sm text-slate-300">Name
+              <input className="input mt-1" aria-label="Name" value={config.name} onChange={(event) => setConfig({ ...config, name: event.target.value })} />
+            </label>
+            <label className="block text-sm text-slate-300">Executor
+              <select className="input mt-1" aria-label="Executor" value={config.executorKind} onChange={(event) => setConfig({ ...config, executorKind: event.target.value })}>
+                <option value="fake">Fake (no model calls)</option>
+                <option value="llm">Model router</option>
+                <option value="cursor">Cursor</option>
+                <option value="codex">Codex</option>
+              </select>
+            </label>
+            <label className="block text-sm text-slate-300 md:col-span-2">Description
+              <input className="input mt-1" aria-label="Description" value={config.description} onChange={(event) => setConfig({ ...config, description: event.target.value })} placeholder="Optional short summary for this agent" />
+            </label>
+          </div>
+        </section>
+
+        <section className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+          <header className="space-y-1 border-b border-slate-800 pb-3">
+            <h3 className="text-sm font-semibold text-slate-100">2. Board</h3>
+            <p className="text-sm text-slate-400">Connect the ticket board this agent reads and updates.</p>
+          </header>
+          <p className="rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2 text-sm text-slate-400">
+            {data.agent.credential?.configured
+              ? `Board credential saved ${data.agent.credential.hint}. Leave the key and token blank to keep them.`
+              : "No board credential is saved yet."}
+          </p>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block text-sm text-slate-300">Provider
+              <select className="input mt-1" aria-label="Provider" value={config.provider} onChange={(event) => setConfig({ ...config, provider: event.target.value })}>
+                <option value="none">None</option>
+                <option value="trello">Trello</option>
+                <option value="github_projects">GitHub Projects</option>
+              </select>
+            </label>
+            <label className="block text-sm text-slate-300">Board name
+              <input className="input mt-1" aria-label="Board name" value={config.boardName} onChange={(event) => setConfig({ ...config, boardName: event.target.value })} />
+            </label>
+            <label className="block text-sm text-slate-300 md:col-span-2">Board id
+              <input className="input mt-1" aria-label="Board id" value={config.boardId} onChange={(event) => setConfig({ ...config, boardId: event.target.value })} />
+            </label>
+            {config.provider === "trello" ? (
+              <>
+                <label className="block text-sm text-slate-300">Trello API key
+                  <input className="input mt-1" aria-label="Trello API key" autoComplete="off" spellCheck={false} placeholder="Leave blank to keep the saved key" value={config.boardKey} onChange={(event) => setConfig({ ...config, boardKey: event.target.value })} />
+                </label>
+                <label className="block text-sm text-slate-300">Trello token
+                  <input className="input mt-1" aria-label="Trello token" autoComplete="off" spellCheck={false} placeholder="Leave blank to keep the saved token" value={config.boardToken} onChange={(event) => setConfig({ ...config, boardToken: event.target.value })} />
+                </label>
+              </>
+            ) : null}
+            {config.provider === "github_projects" ? (
+              <label className="block text-sm text-slate-300 md:col-span-2">GitHub Projects token
+                <input className="input mt-1" aria-label="GitHub Projects token" autoComplete="off" spellCheck={false} placeholder="Leave blank to keep the saved token" value={config.boardToken} onChange={(event) => setConfig({ ...config, boardToken: event.target.value })} />
+              </label>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="space-y-4 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+          <header className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-800 pb-3">
+            <div className="space-y-1">
+              <h3 className="text-sm font-semibold text-slate-100">3. GitHub repository</h3>
+              <p className="text-sm text-slate-400">Required. Authenticate a GitHub account, then choose the primary and linked repositories.</p>
+            </div>
+            <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${data.agent.repositoryCredential?.configured || githubAccount ? "bg-emerald-500/15 text-emerald-300" : "bg-amber-500/15 text-amber-300"}`}>
+              {githubAccount ? `Connected @${githubAccount.login}` : data.agent.repositoryCredential?.configured ? `Linked ${data.agent.repositoryCredential.hint}` : "Not connected"}
+            </span>
+          </header>
+
+          <div className="space-y-3 rounded-lg border border-slate-800 bg-slate-900/50 p-3">
+            <div>
+              <h4 className="text-sm font-medium text-slate-200">Connect account</h4>
+              <p className="mt-1 text-xs text-slate-500">
+                {data.agent.repositoryCredential?.configured
+                  ? "A GitHub token is already saved. Leave this blank to keep it, or paste a new token and reconnect."
+                  : "Paste a personal access token, then connect so the agent can clone, push, and open pull requests."}
+              </p>
+            </div>
+            <label className="block text-sm text-slate-300">GitHub personal access token
+              <input className="input mt-1" aria-label="GitHub personal access token" autoComplete="off" spellCheck={false} required={!data.agent.repositoryCredential?.configured} placeholder={data.agent.repositoryCredential?.configured ? "Leave blank to keep the saved token" : "ghp_… or github_pat_…"} value={config.repositoryToken} onChange={(event) => setConfig({ ...config, repositoryToken: event.target.value })} />
+            </label>
+            <button type="button" className="btn" disabled={connectingGithub || !config.repositoryToken.trim()} onClick={() => void connectGithub()}>{connectingGithub ? "Connecting…" : "Connect GitHub account"}</button>
+            {githubAccount ? <p className="text-sm text-emerald-300">Signed in as @{githubAccount.login}{githubAccount.name ? ` · ${githubAccount.name}` : ""}</p> : null}
+          </div>
+
+          <div className="space-y-3 rounded-lg border border-slate-800 bg-slate-900/50 p-3">
+            <div>
+              <h4 className="text-sm font-medium text-slate-200">Primary repository</h4>
+              <p className="mt-1 text-xs text-slate-500">The main repo this agent works in. Pick one from the connected account or enter it manually.</p>
+            </div>
+            {githubRepos.length > 0 ? (
+              <label className="block text-sm text-slate-300">Choose from connected account
+                <select className="input mt-1" aria-label="Choose a repository from this account" value={config.repositoryName} onChange={(event) => selectPrimaryRepository(event.target.value)}>
+                  <option value="">Select a repository</option>
+                  {githubRepos.map((repository) => <option key={repository.fullName} value={repository.fullName}>{repository.fullName}</option>)}
+                </select>
+              </label>
+            ) : null}
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="block text-sm text-slate-300">Repository URL
+                <input className="input mt-1" aria-label="Repository URL" required={!config.repositoryName.trim()} value={config.repositoryUrl} onChange={(event) => setConfig({ ...config, repositoryUrl: event.target.value })} placeholder="https://github.com/owner/name" />
+              </label>
+              <label className="block text-sm text-slate-300">Repository
+                <input className="input mt-1" aria-label="Repository" required={!config.repositoryUrl.trim()} value={config.repositoryName} onChange={(event) => setConfig({ ...config, repositoryName: event.target.value })} placeholder="owner/name" />
+              </label>
+              <label className="block text-sm text-slate-300">Default branch
+                <input className="input mt-1" aria-label="Default branch" value={config.defaultBranch} onChange={(event) => setConfig({ ...config, defaultBranch: event.target.value })} />
+              </label>
+            </div>
+          </div>
+
+          <div className="space-y-3 rounded-lg border border-slate-800 bg-slate-900/50 p-3">
+            <div>
+              <h4 className="text-sm font-medium text-slate-200">Linked repositories</h4>
+              <p className="mt-1 text-xs text-slate-500">Optional secondary repos from the same GitHub account that this agent may edit with the same credentials.</p>
+            </div>
             {config.linkedRepositories.length === 0 ? <p className="text-sm text-slate-500">No linked repositories yet.</p> : null}
             {config.linkedRepositories.map((repository, index) => (
               <div key={index} className="flex gap-2">
-                <input className="input" aria-label={`Linked repository ${index + 1}`} value={repository} placeholder="owner/name" onChange={(event) => setConfig({ ...config, linkedRepositories: config.linkedRepositories.map((item, itemIndex) => itemIndex === index ? event.target.value : item) })} />
+                {githubRepos.length > 0 ? (
+                  <select className="input" aria-label={`Linked repository ${index + 1}`} value={repository} onChange={(event) => setConfig({ ...config, linkedRepositories: config.linkedRepositories.map((item, itemIndex) => itemIndex === index ? event.target.value : item) })}>
+                    <option value="">Select a repository</option>
+                    {githubRepos.filter((item) => item.fullName === repository || item.fullName.toLowerCase() !== config.repositoryName.trim().toLowerCase()).map((item) => (
+                      <option key={item.fullName} value={item.fullName}>{item.fullName}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input className="input" aria-label={`Linked repository ${index + 1}`} value={repository} placeholder="owner/name" onChange={(event) => setConfig({ ...config, linkedRepositories: config.linkedRepositories.map((item, itemIndex) => itemIndex === index ? event.target.value : item) })} />
+                )}
                 <button type="button" className="btn-ghost" onClick={() => setConfig({ ...config, linkedRepositories: config.linkedRepositories.filter((_, itemIndex) => itemIndex !== index) })}>Remove</button>
               </div>
             ))}
             <button type="button" className="btn-ghost" onClick={() => setConfig({ ...config, linkedRepositories: [...config.linkedRepositories, ""] })}>Add repository</button>
-          </fieldset>
-          <label className="block text-sm text-slate-300">Default branch
-            <input className="input mt-1" aria-label="Default branch" value={config.defaultBranch} onChange={(event) => setConfig({ ...config, defaultBranch: event.target.value })} />
-          </label>
-          <label className="block text-sm text-slate-300">Daily capacity hours
-            <input className="input mt-1" aria-label="Daily capacity hours" type="number" min={1} max={24} value={config.dailyCapacityHours} onChange={(event) => setConfig({ ...config, dailyCapacityHours: Number(event.target.value) })} />
-          </label>
-          <label className="flex items-center gap-2 self-end text-sm text-slate-300">
-            <input type="checkbox" className="h-4 w-4 accent-sky-500" aria-label="Allow over capacity" checked={config.allowOverCapacity} onChange={(event) => setConfig({ ...config, allowOverCapacity: event.target.checked })} />
-            Allow over capacity
-          </label>
-          <label className="block text-sm text-slate-300">Telegram chat id
-            <input className="input mt-1" aria-label="Telegram chat id" value={config.telegramChatId} onChange={(event) => setConfig({ ...config, telegramChatId: event.target.value })} placeholder="Leave blank to use the platform pairing" />
-          </label>
-          <label className="block text-sm text-slate-300">Workspace
-            <input className="input mt-1" aria-label="Workspace" value={data.agent.workspacePath} readOnly />
-          </label>
-          {config.provider === "trello" ? (
-            <>
-              <label className="block text-sm text-slate-300">Trello API key
-                <input className="input mt-1" aria-label="Trello API key" autoComplete="off" spellCheck={false} placeholder="Leave blank to keep the saved key" value={config.boardKey} onChange={(event) => setConfig({ ...config, boardKey: event.target.value })} />
-              </label>
-              <label className="block text-sm text-slate-300">Trello token
-                <input className="input mt-1" aria-label="Trello token" autoComplete="off" spellCheck={false} placeholder="Leave blank to keep the saved token" value={config.boardToken} onChange={(event) => setConfig({ ...config, boardToken: event.target.value })} />
-              </label>
-            </>
-          ) : null}
-          {config.provider === "github_projects" ? (
-            <label className="block text-sm text-slate-300">GitHub token
-              <input className="input mt-1" aria-label="GitHub token" autoComplete="off" spellCheck={false} placeholder="Leave blank to keep the saved token" value={config.boardToken} onChange={(event) => setConfig({ ...config, boardToken: event.target.value })} />
-            </label>
-          ) : null}
-        </div>
-        {workflowConfig ? (
-          <div className="space-y-3">
-            <h3 className="text-sm font-medium text-slate-200">Workflow columns</h3>
-            <div className="grid gap-3 md:grid-cols-3">
-              {CONFIG_COLUMNS.map((column) => (
-                <label key={column.stage} className="block text-sm text-slate-300">{column.label}
-                  <input className="input mt-1" aria-label={`${column.label} column`} value={workflowConfig.columns[column.stage] ?? ""} placeholder={column.stage === "planning" ? "None" : ""} onChange={(event) => setWorkflowConfig({ ...workflowConfig, columns: { ...workflowConfig.columns, [column.stage]: event.target.value } })} />
-                </label>
-              ))}
-            </div>
-            <div className="grid gap-3 md:grid-cols-3">
-              <label className="block text-sm text-slate-300">Max tasks per day
-                <input className="input mt-1" aria-label="Max tasks per day" type="number" min={0} max={1000} value={workflowConfig.maxTasksPerDay} onChange={(event) => setWorkflowConfig({ ...workflowConfig, maxTasksPerDay: Math.min(1000, Math.max(0, Math.trunc(Number(event.target.value) || 0))) })} />
-              </label>
-              <label className="block text-sm text-slate-300">Priority labels
-                <input className="input mt-1" aria-label="Priority labels" value={workflowConfig.priorityLabels} onChange={(event) => setWorkflowConfig({ ...workflowConfig, priorityLabels: event.target.value })} />
-              </label>
-              <label className="block text-sm text-slate-300">Blocked labels
-                <input className="input mt-1" aria-label="Blocked labels" value={workflowConfig.blockedLabels} onChange={(event) => setWorkflowConfig({ ...workflowConfig, blockedLabels: event.target.value })} />
-              </label>
-            </div>
           </div>
+        </section>
+
+        <section className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+          <header className="space-y-1 border-b border-slate-800 pb-3">
+            <h3 className="text-sm font-semibold text-slate-100">4. Capacity & alerts</h3>
+            <p className="text-sm text-slate-400">Daily workload limits and where alerts are sent.</p>
+          </header>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block text-sm text-slate-300">Daily capacity hours
+              <input className="input mt-1" aria-label="Daily capacity hours" type="number" min={1} max={24} value={config.dailyCapacityHours} onChange={(event) => setConfig({ ...config, dailyCapacityHours: Number(event.target.value) })} />
+            </label>
+            <label className="flex items-center gap-2 self-end text-sm text-slate-300">
+              <input type="checkbox" className="h-4 w-4 accent-sky-500" aria-label="Allow over capacity" checked={config.allowOverCapacity} onChange={(event) => setConfig({ ...config, allowOverCapacity: event.target.checked })} />
+              Allow over capacity
+            </label>
+            <label className="block text-sm text-slate-300">Telegram chat id
+              <input className="input mt-1" aria-label="Telegram chat id" value={config.telegramChatId} onChange={(event) => setConfig({ ...config, telegramChatId: event.target.value })} placeholder="Leave blank to use the platform pairing" />
+            </label>
+            <label className="block text-sm text-slate-300">Workspace
+              <input className="input mt-1" aria-label="Workspace" value={data.agent.workspacePath} readOnly />
+            </label>
+          </div>
+        </section>
+
+        {workflowConfig ? (
+          <section className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+            <header className="space-y-1 border-b border-slate-800 pb-3">
+              <h3 className="text-sm font-semibold text-slate-100">5. Workflow</h3>
+              <p className="text-sm text-slate-400">Map board columns and selection rules for ticket pickup.</p>
+            </header>
+            <div>
+              <h4 className="mb-2 text-sm font-medium text-slate-200">Columns</h4>
+              <div className="grid gap-3 md:grid-cols-3">
+                {CONFIG_COLUMNS.map((column) => (
+                  <label key={column.stage} className="block text-sm text-slate-300">{column.label}
+                    <input className="input mt-1" aria-label={`${column.label} column`} value={workflowConfig.columns[column.stage] ?? ""} placeholder={column.stage === "planning" ? "None" : ""} onChange={(event) => setWorkflowConfig({ ...workflowConfig, columns: { ...workflowConfig.columns, [column.stage]: event.target.value } })} />
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <h4 className="mb-2 text-sm font-medium text-slate-200">Selection rules</h4>
+              <div className="grid gap-3 md:grid-cols-3">
+                <label className="block text-sm text-slate-300">Max tasks per day
+                  <input className="input mt-1" aria-label="Max tasks per day" type="number" min={0} max={1000} value={workflowConfig.maxTasksPerDay} onChange={(event) => setWorkflowConfig({ ...workflowConfig, maxTasksPerDay: Math.min(1000, Math.max(0, Math.trunc(Number(event.target.value) || 0))) })} />
+                </label>
+                <label className="block text-sm text-slate-300">Priority labels
+                  <input className="input mt-1" aria-label="Priority labels" value={workflowConfig.priorityLabels} onChange={(event) => setWorkflowConfig({ ...workflowConfig, priorityLabels: event.target.value })} />
+                </label>
+                <label className="block text-sm text-slate-300">Blocked labels
+                  <input className="input mt-1" aria-label="Blocked labels" value={workflowConfig.blockedLabels} onChange={(event) => setWorkflowConfig({ ...workflowConfig, blockedLabels: event.target.value })} />
+                </label>
+              </div>
+            </div>
+          </section>
         ) : null}
-        <button className="btn" type="submit" disabled={savingConfig}>{savingConfig ? "Saving…" : "Save configuration"}</button>
+
+        <div className="flex items-center justify-end border-t border-slate-800 pt-4">
+          <button className="btn" type="submit" disabled={savingConfig}>{savingConfig ? "Saving…" : "Save configuration"}</button>
+        </div>
       </form>
       ) : null}
       </section>

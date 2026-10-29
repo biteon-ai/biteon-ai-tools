@@ -67,7 +67,7 @@ describe("api", () => {
       method: "POST",
       url: "/api/agents",
       headers: { cookie },
-      payload: { boardName: "Billing", repositoryName: "acme/billing", executorKind: "fake" },
+      payload: { boardName: "Billing", repositoryName: "acme/billing", executorKind: "fake", repositoryToken: "ghp_test_repository_token" },
     });
     expect(created.statusCode).toBe(201);
     const agent = created.json();
@@ -263,7 +263,7 @@ describe("api", () => {
       method: "POST",
       url: "/api/agents",
       headers: { cookie },
-      payload: { boardName: "Billing", repositoryName: "acme/billing" },
+      payload: { boardName: "Billing", repositoryName: "acme/billing", repositoryToken: "ghp_test_repository_token" },
     });
     const agent = created.json();
     await app.inject({ method: "POST", url: `/api/agents/${agent.id}/start`, headers: { cookie } });
@@ -390,14 +390,14 @@ describe("api", () => {
       method: "POST",
       url: "/api/agents",
       headers: { cookie },
-      payload: { boardName: "Stack", repositoryName: "acme/web", linkedRepositories: ["acme/api", "acme/web"] },
+      payload: { boardName: "Stack", repositoryName: "acme/web", linkedRepositories: ["acme/api", "acme/web"], repositoryToken: "ghp_test_repository_token" },
     });
     expect(linked.statusCode).toBe(400);
     const createdLinked = await app.inject({
       method: "POST",
       url: "/api/agents",
       headers: { cookie },
-      payload: { boardName: "Stack", repositoryName: "acme/web", linkedRepositories: ["acme/api"] },
+      payload: { boardName: "Stack", repositoryName: "acme/web", linkedRepositories: ["acme/api"], repositoryToken: "ghp_test_repository_token" },
     });
     expect(createdLinked.statusCode).toBe(201);
     expect(createdLinked.json().linkedRepositories).toEqual(["acme/api"]);
@@ -438,7 +438,7 @@ describe("api", () => {
       method: "POST",
       url: "/api/agents",
       headers: { cookie },
-      payload: { boardName: "BitVox", provider: "trello", boardId: "board", credential: JSON.stringify({ key: "key", token: "token" }) },
+      payload: { boardName: "BitVox", repositoryName: "acme/bitvox", provider: "trello", boardId: "board", credential: JSON.stringify({ key: "key", token: "token" }), repositoryToken: "ghp_test_repository_token" },
     });
     const agent = created.json();
     const listed = await app.inject({
@@ -454,7 +454,7 @@ describe("api", () => {
       method: "POST",
       url: "/api/agents",
       headers: { cookie },
-      payload: { boardName: "Token only", provider: "trello", boardId: "board", credential: "raw-token" },
+      payload: { boardName: "Token only", repositoryName: "acme/token-only", provider: "trello", boardId: "board", credential: "raw-token", repositoryToken: "ghp_test_repository_token" },
     });
     const blocked = await app.inject({
       method: "POST",
@@ -535,7 +535,7 @@ describe("api", () => {
         method: "POST",
         url: "/api/agents",
         headers: { cookie },
-        payload: { boardName: "Billing", repositoryName: "acme/billing", executorKind: "fake" },
+        payload: { boardName: "Billing", repositoryName: "acme/billing", executorKind: "fake", repositoryToken: "ghp_test_repository_token" },
       });
       const agent = created.json();
       const taskResponse = await app.inject({
@@ -602,7 +602,7 @@ describe("api", () => {
       method: "POST",
       url: "/api/agents",
       headers: { cookie },
-      payload: { name: "Board Agent", provider: "trello", boardId: "board-1", boardName: "BitVox", boardKey: "trello-key", boardToken: "trello-token", executorKind: "fake" },
+      payload: { name: "Board Agent", provider: "trello", boardId: "board-1", boardName: "BitVox", repositoryName: "acme/bitvox", boardKey: "trello-key", boardToken: "trello-token", executorKind: "fake", repositoryToken: "ghp_test_repository_token" },
     });
     expect(created.statusCode).toBe(201);
     const agent = created.json();

@@ -23,6 +23,41 @@ export async function githubGraphql<T>(token: string, query: string, variables: 
   return body.data;
 }
 
+export async function verifyGithubAccount(token: string, fetchImpl: FetchLike = fetch): Promise<{ login: string; name: string | null }> {
+  const response = await fetchImpl("https://api.github.com/user", {
+    headers: {
+      authorization: `Bearer ${token}`,
+      accept: "application/vnd.github+json",
+      "user-agent": "agent-platform",
+    },
+  });
+  if (response.status === 401 || response.status === 403) throw new Error("GitHub account authentication failed");
+  if (!response.ok) throw new Error(`GitHub account request failed with status ${response.status}`);
+  const body = await response.json() as { login?: string; name?: string | null };
+  if (!body.login) throw new Error("GitHub account response did not include a login");
+  return { login: body.login, name: body.name ?? null };
+}
+
+export async function listGithubAccountRepositories(token: string, fetchImpl: FetchLike = fetch): Promise<{ fullName: string; htmlUrl: string; defaultBranch: string }[]> {
+  const response = await fetchImpl("https://api.github.com/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member", {
+    headers: {
+      authorization: `Bearer ${token}`,
+      accept: "application/vnd.github+json",
+      "user-agent": "agent-platform",
+    },
+  });
+  if (response.status === 401 || response.status === 403) throw new Error("GitHub account authentication failed");
+  if (!response.ok) throw new Error(`GitHub repositories request failed with status ${response.status}`);
+  const body = await response.json() as Array<{ full_name?: string; html_url?: string; default_branch?: string }>;
+  return body
+    .filter((item) => item.full_name && item.html_url)
+    .map((item) => ({
+      fullName: item.full_name!,
+      htmlUrl: item.html_url!,
+      defaultBranch: item.default_branch || "main",
+    }));
+}
+
 export async function listGithubProjects(token: string, owner: string, name: string, fetchImpl?: FetchLike): Promise<{ id: string; title: string; number: number }[]> {
   const data = await githubGraphql<{ repository?: { projectsV2?: { nodes?: { id: string; title: string; number: number }[] } } }>(
     token,

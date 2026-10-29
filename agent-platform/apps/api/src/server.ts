@@ -66,7 +66,7 @@ import {
   type PlatformEnv,
 } from "@agent-platform/core";
 import type { PlatformStore } from "@agent-platform/db";
-import { createBoardClient, listBoardColumns, listGithubProjects, listTrelloBoards, listTrelloLists, mergeApprovedChanges, PAIRING_TTL_SECONDS, parseCredentials, readTrelloCardMove, refreshStoredBoard, listProviderModels, registerTrelloWebhook, sendTelegramMessage, telegramBotProfile, telegramDeepLink, type PairingStore } from "@agent-platform/integrations";
+import { createBoardClient, listBoardColumns, listGithubAccountRepositories, listGithubProjects, listTrelloBoards, listTrelloLists, mergeApprovedChanges, PAIRING_TTL_SECONDS, parseCredentials, readTrelloCardMove, refreshStoredBoard, listProviderModels, registerTrelloWebhook, sendTelegramMessage, telegramBotProfile, telegramDeepLink, verifyGithubAccount, type PairingStore } from "@agent-platform/integrations";
 import type { TickQueue } from "./queue.js";
 
 export interface ServerDeps {
@@ -94,7 +94,12 @@ const CreateAgent = z.object({
   credential: z.string().optional(),
   boardKey: z.string().optional(),
   boardToken: z.string().optional(),
+  repositoryToken: z.string().min(1),
   telegramChatId: z.string().default(""),
+}).superRefine((body, ctx) => {
+  if (!body.repositoryName.trim() && !body.repositoryUrl.trim()) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "A primary repository name or URL is required", path: ["repositoryName"] });
+  }
 });
 
 const ProviderBody = z.object({
@@ -211,9 +216,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       deps.store.listMemories(agent.id),
       deps.store.listRuns(agent.id),
     ]);
-    const secret = agent.credentialSecretId ? await deps.store.getSecret(agent.credentialSecretId) : null;
     return {
-      agent: { ...agent, credential: { configured: Boolean(secret), hint: secret?.hint ?? "" } },
+      agent: await publicAgent(deps, agent),
       workflow,
       tasks,
       events,
@@ -240,21 +244,35 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       credential: z.string().optional(),
       boardKey: z.string().optional(),
       boardToken: z.string().optional(),
+      repositoryToken: z.string().optional(),
       telegramChatId: z.string().optional(),
     }).parse(request.body ?? {});
-    const { credential, boardKey, boardToken, ...rest } = body;
+    const { credential, boardKey, boardToken, repositoryToken: repositoryTokenValue, ...rest } = body;
     const next = { ...agent, ...rest, updatedAt: nowIso() };
     if (body.linkedRepositories || body.repositoryName || body.repositoryUrl) {
       next.linkedRepositories = normalizeLinked(body.repositoryName ?? agent.repositoryName, body.repositoryUrl ?? agent.repositoryUrl, body.linkedRepositories ?? agent.linkedRepositories);
     }
+    const repositoryName = (body.repositoryName ?? next.repositoryName).trim();
+    const repositoryUrl = (body.repositoryUrl ?? next.repositoryUrl).trim();
+    if (!repositoryName && !repositoryUrl) {
+      return reply.code(400).send({ error: "A primary repository name or URL is required" });
+    }
+    next.repositoryName = repositoryName;
+    next.repositoryUrl = repositoryUrl;
     const provider = body.provider ?? agent.provider;
     const replacement = boardCredential(provider, credential, boardKey, boardToken, await currentBoardCredential(deps, agent));
     const stored = await storedBoardCredential(deps, `${next.name} credential`, replacement);
     if (stored) next.credentialSecretId = stored;
+    if (repositoryTokenValue?.trim()) {
+      next.repositorySecretId = await storeCredential(deps, `${next.name} repository`, repositoryTokenValue.trim());
+    }
+    if (!next.repositorySecretId) {
+      return reply.code(400).send({ error: "Connect and authenticate a GitHub account for the repository" });
+    }
     await deps.store.updateAgent(next);
     await ensureTrelloWebhook(deps, next);
     await audit(deps, request.userId, "agent.update", next.id);
-    return next;
+    return publicAgent(deps, next);
   });
   app.delete("/api/agents/:id", async (request, reply) => {
     const agent = await requireAgent(deps, request, reply);
@@ -872,6 +890,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const body = z.object({ key: z.string().min(1), token: z.string().min(1) }).parse(request.body);
     return listTrelloBoards(body, deps.fetchImpl);
   });
+  app.post("/api/integrations/github/account", async (request) => {
+    const body = z.object({ token: z.string().min(1) }).parse(request.body);
+    const account = await verifyGithubAccount(body.token, deps.fetchImpl);
+    const repositories = await listGithubAccountRepositories(body.token, deps.fetchImpl);
+    return { account, repositories };
+  });
   app.post("/api/integrations/github/projects", async (request) => {
     const body = z.object({ token: z.string().min(1), owner: z.string().min(1), repo: z.string().min(1) }).parse(request.body);
     return listGithubProjects(body.token, body.owner, body.repo, deps.fetchImpl);
@@ -943,6 +967,7 @@ async function createAgent(deps: ServerDeps, body: z.infer<typeof CreateAgent>, 
     dailyCapacityHours: body.dailyCapacityHours,
     allowOverCapacity: body.allowOverCapacity,
     credentialSecretId: await storedBoardCredential(deps, `${source} credential`, boardCredential(body.provider, body.credential, body.boardKey, body.boardToken, { key: "", token: "" })),
+    repositorySecretId: await storeCredential(deps, `${source} repository`, body.repositoryToken.trim()),
     telegramChatId: body.telegramChatId,
     rules: defaultRules(),
     createdAt: timestamp,
@@ -1175,10 +1200,27 @@ async function decide(deps: ServerDeps, request: FastifyRequest, reply: FastifyR
 }
 
 async function repositoryToken(deps: ServerDeps, agent: Agent | null): Promise<string> {
+  if (agent?.repositorySecretId) {
+    const secret = await deps.store.getSecret(agent.repositorySecretId);
+    if (secret) {
+      const value = decryptSecret(secret, deps.env.APP_MASTER_KEY).trim();
+      if (value) return value;
+    }
+  }
   const fromEnv = (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || process.env.GITLAB_TOKEN || "").trim();
   if (fromEnv) return fromEnv;
   if (!agent || agent.provider !== "github_projects") return "";
   return (await credentialsFor(deps, agent)).token;
+}
+
+async function publicAgent(deps: ServerDeps, agent: Agent) {
+  const boardSecret = agent.credentialSecretId ? await deps.store.getSecret(agent.credentialSecretId) : null;
+  const repositorySecret = agent.repositorySecretId ? await deps.store.getSecret(agent.repositorySecretId) : null;
+  return {
+    ...agent,
+    credential: { configured: Boolean(boardSecret), hint: boardSecret?.hint ?? "" },
+    repositoryCredential: { configured: Boolean(repositorySecret), hint: repositorySecret?.hint ?? "" },
+  };
 }
 
 async function publishDecision(deps: ServerDeps, agent: Agent | null, task: Task, decision: "approved" | "rejected", mergedInto: string | null): Promise<void> {

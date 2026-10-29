@@ -38,6 +38,7 @@ export const agents = pgTable("agents", {
   dailyCapacityHours: doublePrecision("daily_capacity_hours").notNull(),
   allowOverCapacity: boolean("allow_over_capacity").notNull(),
   credentialSecretId: uuid("credential_secret_id"),
+  repositorySecretId: uuid("repository_secret_id"),
   telegramChatId: text("telegram_chat_id").notNull(),
   rules: jsonb("rules").$type<AgentRules>().notNull(),
   createdAt: ts("created_at").notNull(),

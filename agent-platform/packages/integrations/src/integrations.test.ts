@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { defaultRules, newId, nowIso, type Agent } from "@agent-platform/shared";
 import { ProcessRuntime } from "@agent-platform/core";
 import { createBoardClient, listBoardColumns, parseCredentials } from "./board-factory.js";
-import { parseProjectItems } from "./github.js";
+import { listGithubAccountRepositories, parseProjectItems, verifyGithubAccount } from "./github.js";
 import { openLinkedChanges, mergeApprovedChanges } from "./changes.js";
 import { WorkspaceGit } from "./git.js";
 import { createPairingStore, memoryPairingStore, parsePairingStart, telegramDeepLink, type PairingCache } from "./pairing.js";
@@ -46,6 +46,16 @@ describe("integrations", () => {
     expect(parseCredentials('{"token":"abc"}', "github_projects").token).toBe("abc");
     expect(parseCredentials("raw-trello-token", "trello")).toEqual({ key: "", token: "raw-trello-token" });
     expect(parseCredentials('{"key":"k","token":"t"}', "trello")).toEqual({ key: "k", token: "t" });
+    const account = await verifyGithubAccount("github-secret-token", async (input) => {
+      expect(String(input)).toContain("api.github.com/user");
+      return new Response(JSON.stringify({ login: "octo", name: "Octo Cat" }));
+    });
+    expect(account).toEqual({ login: "octo", name: "Octo Cat" });
+    const repositories = await listGithubAccountRepositories("github-secret-token", async () => new Response(JSON.stringify([
+      { full_name: "acme/web", html_url: "https://github.com/acme/web", default_branch: "develop" },
+    ])));
+    expect(repositories).toEqual([{ fullName: "acme/web", htmlUrl: "https://github.com/acme/web", defaultBranch: "develop" }]);
+    expect(JSON.stringify(account)).not.toContain("github-secret-token");
     const columns = await listBoardColumns({
       provider: "trello",
       boardId: "board",
@@ -102,6 +112,7 @@ describe("integrations", () => {
       dailyCapacityHours: 8,
       allowOverCapacity: false,
       credentialSecretId: null,
+    repositorySecretId: null,
       telegramChatId: "",
       rules: defaultRules(),
       createdAt: nowIso(),
@@ -179,6 +190,7 @@ describe("integrations", () => {
       dailyCapacityHours: 8,
       allowOverCapacity: false,
       credentialSecretId: null,
+    repositorySecretId: null,
       telegramChatId: "",
       rules: defaultRules(),
       createdAt: nowIso(),
@@ -255,6 +267,7 @@ describe("integrations", () => {
       dailyCapacityHours: 8,
       allowOverCapacity: false,
       credentialSecretId: null,
+    repositorySecretId: null,
       telegramChatId: "",
       rules: defaultRules(),
       createdAt: nowIso(),
@@ -285,6 +298,7 @@ describe("integrations", () => {
       dailyCapacityHours: 8,
       allowOverCapacity: false,
       credentialSecretId: null,
+    repositorySecretId: null,
       telegramChatId: "",
       rules: defaultRules(),
       createdAt: nowIso(),

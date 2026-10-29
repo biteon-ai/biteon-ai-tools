@@ -108,6 +108,7 @@ function agent(workspace: string): Agent {
     dailyCapacityHours: 8,
     allowOverCapacity: false,
     credentialSecretId: null,
+    repositorySecretId: null,
     telegramChatId: "",
     rules: { ...defaultRules(), allowEmptyChecks: true, validationCommands: [] },
     createdAt: "2026-10-28T12:00:00.000Z",

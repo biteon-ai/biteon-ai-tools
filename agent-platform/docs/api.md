@@ -28,6 +28,9 @@ All routes except `GET /health`, `GET /ready`, and `POST /api/auth/login` requir
 | GET | `/api/telegram/pair/:token` | Poll a pairing session |
 | POST | `/api/telegram/test` | Send a test alert to the paired chat |
 | POST | `/api/integrations/trello/boards` | List boards for a key and token |
+| POST | `/api/integrations/github/account` | Verify a GitHub personal access token and list repositories the account can access |
 | POST | `/api/integrations/github/projects` | List Projects v2 for a repository |
+
+Creating or updating an agent requires a primary repository (`repositoryName` or `repositoryUrl`) and a GitHub account token (`repositoryToken`) used for clone, push, pull requests, and linked repositories. Leave `repositoryToken` blank on update to keep the saved credential.
 
 Trello credentials are stored as JSON `{"key","token"}`. GitHub credentials are stored as `{"token"}` or a raw token. The browser sends them once over the same origin; the API encrypts them before insert.

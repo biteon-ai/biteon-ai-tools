@@ -165,6 +165,7 @@ export interface Agent {
   dailyCapacityHours: number;
   allowOverCapacity: boolean;
   credentialSecretId: string | null;
+  repositorySecretId: string | null;
   telegramChatId: string;
   rules: AgentRules;
   createdAt: string;

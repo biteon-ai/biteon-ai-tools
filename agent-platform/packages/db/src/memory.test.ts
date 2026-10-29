@@ -29,6 +29,7 @@ export async function assertStoreRoundTrip(store: PlatformStore): Promise<void> 
     dailyCapacityHours: 8,
     allowOverCapacity: false,
     credentialSecretId: null,
+    repositorySecretId: null,
     telegramChatId: "",
     rules: defaultRules(),
     createdAt: nowIso(),

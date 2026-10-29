@@ -28,6 +28,7 @@ function makeAgent(workspace: string, id = newId()): Agent {
     dailyCapacityHours: 8,
     allowOverCapacity: false,
     credentialSecretId: null,
+    repositorySecretId: null,
     telegramChatId: "",
     rules: { ...defaultRules(), allowEmptyChecks: true, validationCommands: [] },
     createdAt: nowIso(),
