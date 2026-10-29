@@ -270,13 +270,17 @@ async function notify(store: PlatformStore, agentId: string, taskId: string | nu
     createdAt: nowIso(),
   };
   await store.addNotification(notification);
+  const reasonLine = draft.body
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.startsWith("Reason:") || line.startsWith("- ") || (!line.startsWith("[") && !line.startsWith("Repo:") && !line.startsWith("Task:") && !line.startsWith("Status:") && !line.startsWith("Action:") && !line.startsWith("Reasons:") && Boolean(line)));
   await store.addEvent({
     id: newId(),
     agentId,
     taskId,
     kind: "notification",
-    message: draft.title,
-    metadata: { severity: draft.severity },
+    message: reasonLine ? `${draft.title} — ${reasonLine.replace(/^Reason:\s*/, "").replace(/^- /, "")}` : draft.title,
+    metadata: { severity: draft.severity, body: draft.body },
     createdAt: notification.createdAt,
   });
 }

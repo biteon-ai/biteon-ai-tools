@@ -3,10 +3,11 @@
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { useToast } from "../../components/Toast";
-import { Chip } from "../../components/ui";
+import { Icon } from "../../components/Icons";
+import { Chip, Toggle } from "../../components/ui";
 
 interface Provider { id: string; name: string; type: string; costClass: string; baseUrl: string; credential: { configured: boolean; hint: string } }
-interface Model { id: string; displayName: string; modelId: string; costClass: string; providerId: string }
+interface Model { id: string; displayName: string; modelId: string; costClass: string; providerId: string; enabled: boolean }
 interface Assignment { agentId: string | null; activity: string; modelId: string }
 
 const PAID = new Set(["openai", "anthropic", "cursor", "codex"]);
@@ -26,6 +27,8 @@ export default function ModelsPage() {
   const [catalogNote, setCatalogNote] = useState("");
   const [loadingCatalog, setLoadingCatalog] = useState(false);
   const [primaryOnAdd, setPrimaryOnAdd] = useState(false);
+  const [showProviderForm, setShowProviderForm] = useState(false);
+  const [showModelForm, setShowModelForm] = useState(false);
 
   function costFor(type: string): string {
     if (type === "ollama") return "local";
@@ -84,7 +87,8 @@ export default function ModelsPage() {
     const name = provider.name.trim().toLowerCase();
     return providers.find((item) => {
       if (item.id === editingProviderId) return false;
-      return item.name.trim().toLowerCase() === name || (provider.type !== "custom" && item.type === provider.type);
+      if (item.name.trim().toLowerCase() === name) return true;
+      return provider.type === "ollama" && item.type === "ollama";
     });
   }
 
@@ -102,6 +106,7 @@ export default function ModelsPage() {
         : await api<{ id: string; updated?: boolean }>("/api/providers", { method: "POST", body: JSON.stringify(payload) });
       setProvider({ name: "Ollama", type: "ollama", baseUrl: "http://host.docker.internal:11434/v1", apiKey: "", costClass: "local" });
       setEditingProviderId(null);
+      setShowProviderForm(false);
       await load();
       if (already || ("updated" in saved && saved.updated)) toast("Provider already exists. Updated existing settings.", "warning");
       else if (editing) toast("Provider settings saved", "success");
@@ -116,13 +121,23 @@ export default function ModelsPage() {
   function cancelEdit() {
     setEditingProviderId(null);
     setProvider({ name: "Ollama", type: "ollama", baseUrl: "http://host.docker.internal:11434/v1", apiKey: "", costClass: "local" });
+    setShowProviderForm(false);
+  }
+
+  function startAddProvider() {
+    setEditingProviderId(null);
+    setProvider({ name: "Ollama", type: "ollama", baseUrl: "http://host.docker.internal:11434/v1", apiKey: "", costClass: "local" });
+    setShowProviderForm((open) => !open);
   }
 
   async function removeProvider(item: Provider) {
     if (!window.confirm(`Remove ${item.name}? Models assigned to it will be unlinked.`)) return;
     try {
       await api(`/api/providers/${item.id}`, { method: "DELETE" });
-      if (editingProviderId === item.id) setEditingProviderId(null);
+      if (editingProviderId === item.id) {
+        setEditingProviderId(null);
+        setShowProviderForm(false);
+      }
       await load();
       toast(`${item.name} removed`, "success");
     } catch (err) {
@@ -144,6 +159,7 @@ export default function ModelsPage() {
       const saved = await api<Model>("/api/models", { method: "POST", body: JSON.stringify(model) });
       if (primaryOnAdd) await saveActivities(saved, PRIMARY_ACTIVITIES);
       setPrimaryOnAdd(false);
+      setShowModelForm(false);
       await load();
       toast(primaryOnAdd ? `${model.displayName} added as the primary model` : `${model.displayName} added`, "success");
     } catch (err) {
@@ -158,6 +174,10 @@ export default function ModelsPage() {
   }
 
   async function assign(activity: string, item: Model) {
+    if (!item.enabled) {
+      toast("Enable the model before assigning an activity", "warning");
+      return;
+    }
     try {
       await saveActivities(item, [activity]);
       await load();
@@ -168,6 +188,10 @@ export default function ModelsPage() {
   }
 
   async function makePrimary(item: Model) {
+    if (!item.enabled) {
+      toast("Enable the model before making it primary", "warning");
+      return;
+    }
     try {
       await saveActivities(item, PRIMARY_ACTIVITIES);
       await load();
@@ -177,7 +201,18 @@ export default function ModelsPage() {
     }
   }
 
+  async function setModelEnabled(item: Model, enabled: boolean) {
+    try {
+      await api(`/api/models/${item.id}`, { method: "PATCH", body: JSON.stringify({ enabled }) });
+      await load();
+      toast(enabled ? `${item.displayName} enabled` : `${item.displayName} disabled`, enabled ? "success" : "warning");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not update the model", "error");
+    }
+  }
+
   const providerCost = provider.type === "custom" ? provider.costClass : costFor(provider.type);
+  const sortedModels = [...models].sort((left, right) => Number(right.enabled !== false) - Number(left.enabled !== false) || Number(isPrimary(right)) - Number(isPrimary(left)) || left.displayName.localeCompare(right.displayName));
 
   return (
     <div className="mx-auto max-w-4xl space-y-8">
@@ -187,52 +222,94 @@ export default function ModelsPage() {
       </header>
 
       <section className="space-y-3">
-        <div>
-          <h2 className="text-sm font-medium text-slate-200">Providers</h2>
-          <p className="text-sm text-slate-500">A built-in type such as Ollama is saved once. Submitting it again updates that provider.</p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-medium text-slate-200">Providers</h2>
+            <p className="text-sm text-slate-500">Give each Cursor, OpenAI, Anthropic, or Codex account its own name. Ollama stays a single local provider.</p>
+          </div>
+          <button
+            type="button"
+            className="btn-ghost inline-flex items-center gap-2"
+            aria-expanded={showProviderForm}
+            aria-controls="provider-form"
+            onClick={startAddProvider}
+          >
+            <Icon name="chevron" className={`h-4 w-4 transition ${showProviderForm && !editingProviderId ? "rotate-180" : ""}`} />
+            {showProviderForm && !editingProviderId ? "Hide form" : "Add provider"}
+          </button>
         </div>
-        <form onSubmit={addProvider} autoComplete="off" className="card space-y-4 p-4 md:p-5">
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-slate-400">Name</span>
-              <input className="input" aria-label="Provider name" autoComplete="off" value={provider.name} onChange={(event) => setProvider({ ...provider, name: event.target.value })} />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-slate-400">Type</span>
-              <select className="input" aria-label="Provider type" value={provider.type} onChange={(event) => setProvider({ ...provider, type: event.target.value, costClass: costFor(event.target.value) })}>
-                {["ollama", "openai", "anthropic", "cursor", "codex", "custom"].map((type) => <option key={type}>{type}</option>)}
-              </select>
-            </label>
-            <label className="block space-y-1.5 md:col-span-2">
-              <span className="text-xs font-medium text-slate-400">Base URL</span>
-              <input className="input font-mono text-[13px]" aria-label="Base URL" autoComplete="off" spellCheck={false} value={provider.baseUrl} onChange={(event) => setProvider({ ...provider, baseUrl: event.target.value })} placeholder="http://host.docker.internal:11434/v1" />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-slate-400">API key</span>
-              <input type="password" className="input" aria-label="API key" autoComplete="new-password" spellCheck={false} value={provider.apiKey} onChange={(event) => setProvider({ ...provider, apiKey: event.target.value })} placeholder={editingProviderId ? "Leave blank to keep the saved key" : "Optional"} />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-slate-400">Cost class</span>
-              {provider.type === "custom" ? (
-                <select className="input" aria-label="Cost class" value={provider.costClass} onChange={(event) => setProvider({ ...provider, costClass: event.target.value })}>
-                  <option value="local">local</option>
-                  <option value="hosted_free">hosted_free</option>
-                  <option value="paid">paid</option>
+
+        {showProviderForm || editingProviderId ? (
+          <form id="provider-form" onSubmit={addProvider} autoComplete="off" className="card space-y-4 p-4 md:p-5">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-100">{editingProviderId ? "Edit provider" : "New provider"}</h3>
+                <p className="text-xs text-slate-500">{editingProviderId ? "Update the selected account settings." : "Connect an account, then add models from it below."}</p>
+              </div>
+              <button type="button" className="btn-ghost" onClick={cancelEdit}>Close</button>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="block space-y-1.5">
+                <span className="text-xs font-medium text-slate-400">Name</span>
+                <input className="input" aria-label="Provider name" autoComplete="off" value={provider.name} onChange={(event) => setProvider({ ...provider, name: event.target.value })} placeholder={provider.type === "cursor" ? "Cursor Emad" : provider.type === "ollama" ? "Ollama" : "Account name"} />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-xs font-medium text-slate-400">Type</span>
+                <select className="input" aria-label="Provider type" value={provider.type} onChange={(event) => {
+                  const type = event.target.value;
+                  const defaults: Record<string, { name: string; baseUrl: string }> = {
+                    ollama: { name: "Ollama", baseUrl: "http://host.docker.internal:11434/v1" },
+                    openai: { name: "OpenAI", baseUrl: "https://api.openai.com/v1" },
+                    anthropic: { name: "Anthropic", baseUrl: "" },
+                    cursor: { name: "", baseUrl: "" },
+                    codex: { name: "Codex", baseUrl: "" },
+                    custom: { name: "Custom", baseUrl: "" },
+                  };
+                  const next = defaults[type] ?? { name: provider.name, baseUrl: provider.baseUrl };
+                  const keepName = Boolean(editingProviderId) || (provider.name.trim() !== "" && !["Ollama", "OpenAI", "Anthropic", "Codex", "Custom"].includes(provider.name.trim()));
+                  setProvider({
+                    ...provider,
+                    type,
+                    costClass: costFor(type),
+                    name: keepName ? provider.name : next.name,
+                    baseUrl: editingProviderId ? provider.baseUrl : next.baseUrl,
+                  });
+                }}>
+                  {["ollama", "openai", "anthropic", "cursor", "codex", "custom"].map((type) => <option key={type}>{type}</option>)}
                 </select>
-              ) : (
-                <div className="flex h-[38px] items-center"><Chip>{providerCost}</Chip></div>
-              )}
-            </label>
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-800 pt-4">
-            {editingProviderId ? <button className="btn-ghost" type="button" onClick={cancelEdit}>Cancel</button> : null}
-            <button className="btn" type="submit" disabled={savingProvider} aria-busy={savingProvider}>
-              {savingProvider ? <span className="inline-block h-4 w-4 rounded-full border-2 border-slate-950 border-t-transparent" style={{ animation: "spin 0.7s linear infinite" }} /> : null}
-              {savingProvider ? "Saving…" : editingProviderId ? "Save provider" : "Add provider"}
-            </button>
-          </div>
-        </form>
-        {providers.length === 0 ? <p className="text-sm text-slate-500">No providers yet.</p> : (
+              </label>
+              <label className="block space-y-1.5 md:col-span-2">
+                <span className="text-xs font-medium text-slate-400">Base URL</span>
+                <input className="input font-mono text-[13px]" aria-label="Base URL" autoComplete="off" spellCheck={false} value={provider.baseUrl} onChange={(event) => setProvider({ ...provider, baseUrl: event.target.value })} placeholder="http://host.docker.internal:11434/v1" />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-xs font-medium text-slate-400">API key</span>
+                <input type="password" className="input" aria-label="API key" autoComplete="new-password" spellCheck={false} value={provider.apiKey} onChange={(event) => setProvider({ ...provider, apiKey: event.target.value })} placeholder={editingProviderId ? "Leave blank to keep the saved key" : "Optional"} />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-xs font-medium text-slate-400">Cost class</span>
+                {provider.type === "custom" ? (
+                  <select className="input" aria-label="Cost class" value={provider.costClass} onChange={(event) => setProvider({ ...provider, costClass: event.target.value })}>
+                    <option value="local">local</option>
+                    <option value="hosted_free">hosted_free</option>
+                    <option value="paid">paid</option>
+                  </select>
+                ) : (
+                  <div className="flex h-[38px] items-center"><Chip>{providerCost}</Chip></div>
+                )}
+              </label>
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-800 pt-4">
+              {editingProviderId ? <button className="btn-ghost" type="button" onClick={cancelEdit}>Cancel</button> : null}
+              <button className="btn" type="submit" disabled={savingProvider} aria-busy={savingProvider}>
+                {savingProvider ? <span className="inline-block h-4 w-4 rounded-full border-2 border-slate-950 border-t-transparent" style={{ animation: "spin 0.7s linear infinite" }} /> : null}
+                {savingProvider ? "Saving…" : editingProviderId ? "Save provider" : "Add provider"}
+              </button>
+            </div>
+          </form>
+        ) : null}
+
+        {providers.length === 0 ? <p className="text-sm text-slate-500">No providers yet. Add one to connect models.</p> : (
           <ul className="space-y-2">
             {providers.map((item) => (
               <li key={item.id} className={`card px-4 py-3 ${editingProviderId === item.id ? "border-sky-500/60" : ""}`}>
@@ -249,6 +326,7 @@ export default function ModelsPage() {
                   <div className="flex gap-2">
                     <button className="btn-ghost" type="button" onClick={() => {
                       setEditingProviderId(item.id);
+                      setShowProviderForm(true);
                       setProvider({ name: item.name, type: item.type, baseUrl: item.baseUrl, costClass: item.costClass, apiKey: "" });
                     }}>Edit</button>
                     <button className="btn-ghost" type="button" onClick={() => void removeProvider(item)}>Delete</button>
@@ -261,73 +339,120 @@ export default function ModelsPage() {
       </section>
 
       <section className="space-y-3">
-        <div>
-          <h2 className="text-sm font-medium text-slate-200">Models</h2>
-          <p className="text-sm text-slate-500">Each provider loads its own model list. The primary model is listed first and runs planning, coding, and testing.</p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-medium text-slate-200">Models</h2>
+            <p className="text-sm text-slate-500">Disable a model to keep it configured without using it. The primary model runs planning, coding, and testing.</p>
+          </div>
+          <button
+            type="button"
+            className="btn-ghost inline-flex items-center gap-2"
+            aria-expanded={showModelForm}
+            aria-controls="model-form"
+            onClick={() => setShowModelForm((open) => !open)}
+          >
+            <Icon name="chevron" className={`h-4 w-4 transition ${showModelForm ? "rotate-180" : ""}`} />
+            {showModelForm ? "Hide form" : "Add model"}
+          </button>
         </div>
-        <form onSubmit={addModel} autoComplete="off" className="card space-y-4 p-4 md:p-5">
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-slate-400">Provider</span>
-              <select className="input" aria-label="Model provider" value={model.providerId} onChange={(event) => {
-                const selected = providers.find((item) => item.id === event.target.value);
-                setModel({ ...model, providerId: event.target.value, costClass: selected?.costClass ?? model.costClass });
-              }}>
-                {providers.length === 0 ? <option value="">Add a provider first</option> : null}
-                {providers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-            </label>
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-slate-400">Model</span>
-              <select className="input" aria-label="Model" value={model.modelId} disabled={loadingCatalog || catalog.length === 0} onChange={(event) => {
-                const chosen = catalog.find((item) => item.id === event.target.value);
-                setModel({ ...model, modelId: event.target.value, displayName: chosen?.displayName ?? event.target.value });
-              }}>
-                {catalog.length === 0 ? <option value="">{loadingCatalog ? "Loading models…" : "No models loaded"}</option> : null}
-                {catalog.map((item) => <option key={item.id} value={item.id}>{item.displayName === item.id ? item.displayName : `${item.displayName} · ${item.id}`}</option>)}
-              </select>
-              {catalogNote ? <span className="block text-xs text-slate-500">{catalogNote}</span> : null}
-            </label>
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-slate-400">Display name</span>
-              <input className="input" aria-label="Display name" autoComplete="off" value={model.displayName} onChange={(event) => setModel({ ...model, displayName: event.target.value })} placeholder="Qwen" />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-slate-400">Cost class</span>
-              <div className="flex h-[38px] items-center"><Chip>{model.costClass || "Set by the provider"}</Chip></div>
-            </label>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-4">
-            <label className="flex items-center gap-2 text-sm text-slate-300">
-              <input type="checkbox" aria-label="Make this the primary model" checked={primaryOnAdd} onChange={(event) => setPrimaryOnAdd(event.target.checked)} />
-              Make this the primary model
-            </label>
-            <button className="btn" type="submit" disabled={providers.length === 0 || !model.modelId || loadingCatalog}>{loadingCatalog ? "Loading models…" : "Add model"}</button>
-          </div>
-        </form>
-        {models.length === 0 ? <p className="text-sm text-slate-500">No models yet.</p> : (
-          <ul className="space-y-2">
-            {[...models].sort((left, right) => Number(isPrimary(right)) - Number(isPrimary(left))).map((item) => {
+
+        {showModelForm ? (
+          <form id="model-form" onSubmit={addModel} autoComplete="off" className="card space-y-4 p-4 md:p-5">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-100">New model</h3>
+                <p className="text-xs text-slate-500">Pick a provider account, then choose one of its models.</p>
+              </div>
+              <button type="button" className="btn-ghost" onClick={() => setShowModelForm(false)}>Close</button>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="block space-y-1.5">
+                <span className="text-xs font-medium text-slate-400">Provider</span>
+                <select className="input" aria-label="Model provider" value={model.providerId} onChange={(event) => {
+                  const selected = providers.find((item) => item.id === event.target.value);
+                  setModel({ ...model, providerId: event.target.value, costClass: selected?.costClass ?? model.costClass });
+                }}>
+                  {providers.length === 0 ? <option value="">Add a provider first</option> : null}
+                  {providers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-xs font-medium text-slate-400">Model</span>
+                <select className="input" aria-label="Model" value={model.modelId} disabled={loadingCatalog || catalog.length === 0} onChange={(event) => {
+                  const chosen = catalog.find((item) => item.id === event.target.value);
+                  setModel({ ...model, modelId: event.target.value, displayName: chosen?.displayName ?? event.target.value });
+                }}>
+                  {catalog.length === 0 ? <option value="">{loadingCatalog ? "Loading models…" : "No models loaded"}</option> : null}
+                  {catalog.map((item) => <option key={item.id} value={item.id}>{item.displayName === item.id ? item.displayName : `${item.displayName} · ${item.id}`}</option>)}
+                </select>
+                {catalogNote ? <span className="block text-xs text-slate-500">{catalogNote}</span> : null}
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-xs font-medium text-slate-400">Display name</span>
+                <input className="input" aria-label="Display name" autoComplete="off" value={model.displayName} onChange={(event) => setModel({ ...model, displayName: event.target.value })} placeholder="Qwen" />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-xs font-medium text-slate-400">Cost class</span>
+                <div className="flex h-[38px] items-center"><Chip>{model.costClass || "Set by the provider"}</Chip></div>
+              </label>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-4">
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input type="checkbox" aria-label="Make this the primary model" checked={primaryOnAdd} onChange={(event) => setPrimaryOnAdd(event.target.checked)} />
+                Make this the primary model
+              </label>
+              <button className="btn" type="submit" disabled={providers.length === 0 || !model.modelId || loadingCatalog}>{loadingCatalog ? "Loading models…" : "Add model"}</button>
+            </div>
+          </form>
+        ) : null}
+
+        {models.length === 0 ? <p className="text-sm text-slate-500">No models yet. Add one after a provider is connected.</p> : (
+          <ul className="space-y-3">
+            {sortedModels.map((item) => {
               const owner = providers.find((providerItem) => providerItem.id === item.providerId);
               const primary = isPrimary(item);
+              const enabled = item.enabled !== false;
               const assigned = new Set(globalAssignments().filter((assignment) => assignment.modelId === item.id).map((assignment) => assignment.activity));
               return (
-                <li key={item.id} className={`card px-4 py-3 ${primary ? "border-sky-500/60" : ""}`}>
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="min-w-0 space-y-1">
+                <li key={item.id} className={`overflow-hidden rounded-xl border ${primary && enabled ? "border-sky-500/50 bg-sky-500/5" : "border-slate-800 bg-slate-950/40"} ${enabled ? "" : "opacity-70"}`}>
+                  <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-800/80 px-4 py-3">
+                    <div className="min-w-0 space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium">{item.displayName}</span>
+                        <h3 className="text-base font-semibold text-slate-100">{item.displayName}</h3>
                         {primary ? <Chip>Primary</Chip> : null}
                         <Chip>{item.costClass}</Chip>
                         {owner ? <Chip>{owner.name}</Chip> : null}
                       </div>
-                      <p className="truncate font-mono text-xs text-slate-500">{item.modelId}</p>
+                      <p className="font-mono text-xs text-slate-500">{item.modelId}</p>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button className={primary ? "btn" : "btn-ghost"} type="button" disabled={primary} onClick={() => void makePrimary(item)}>{primary ? "Primary" : "Make primary"}</button>
-                      {ACTIVITIES.map((activity) => (
-                        <button key={activity} className={`${assigned.has(activity) ? "btn" : "btn-ghost"} capitalize`} onClick={() => void assign(activity, item)} type="button">{activity}</button>
-                      ))}
+                    <div className="flex items-center gap-3 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2">
+                      <div className="text-right">
+                        <p className="text-xs font-medium text-slate-300">{enabled ? "Enabled" : "Disabled"}</p>
+                        <p className="text-[11px] text-slate-500">{enabled ? "Available for routing" : "Skipped by agents"}</p>
+                      </div>
+                      <Toggle checked={enabled} label={`${enabled ? "Disable" : "Enable"} ${item.displayName}`} onChange={(value) => void setModelEnabled(item, value)} />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                    <div>
+                      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Role</p>
+                      <button className={primary ? "btn" : "btn-ghost"} type="button" disabled={primary || !enabled} onClick={() => void makePrimary(item)}>{primary ? "Primary model" : "Make primary"}</button>
+                    </div>
+                    <div className="min-w-0 flex-1 md:max-w-xl">
+                      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Activities</p>
+                      <div className="flex flex-wrap gap-2">
+                        {ACTIVITIES.map((activity) => (
+                          <button
+                            key={activity}
+                            className={`${assigned.has(activity) ? "btn" : "btn-ghost"} capitalize`}
+                            disabled={!enabled}
+                            onClick={() => void assign(activity, item)}
+                            type="button"
+                          >
+                            {activity}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </li>

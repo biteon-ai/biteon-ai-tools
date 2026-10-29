@@ -15,6 +15,8 @@ export function assertCostClass(type: ProviderType, costClass: CostClass): void 
   }
 }
 
+const UNIQUE_BY_TYPE = new Set<ProviderType>(["ollama"]);
+
 export function findProviderMatch(
   existing: ProviderRecord[],
   candidate: Pick<ProviderRecord, "name" | "type"> & { id?: string },
@@ -23,7 +25,7 @@ export function findProviderMatch(
   return existing.find((item) => {
     if (candidate.id && item.id === candidate.id) return false;
     if (item.name.trim().toLowerCase() === name) return true;
-    return candidate.type !== "custom" && item.type === candidate.type;
+    return UNIQUE_BY_TYPE.has(candidate.type) && item.type === candidate.type;
   });
 }
 
