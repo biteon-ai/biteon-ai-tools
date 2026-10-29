@@ -164,7 +164,7 @@ export function describeProject(agent: Pick<Agent, "name" | "status" | "reposito
     `${agent.name} [${agent.status}]`,
     `Repo: ${agent.repositoryName || "unassigned"}`,
     agent.boardName ? `Board: ${agent.boardName}` : "",
-    `Branch: ${agent.defaultBranch || "main"}`,
+    `Branch: ${agent.defaultBranch || "develop"}`,
     describeAgentStatus(tasks, agent.dailyCapacityHours, now),
     describeProblems(agent, tasks).split("\n").slice(1).join("\n"),
   ].filter(Boolean).join("\n");

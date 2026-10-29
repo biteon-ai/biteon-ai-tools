@@ -281,7 +281,7 @@ async function execute(deps: TickDeps, _tasks: Task[], task: Task, run: TaskRun,
   const owned = result.checkpoint?.ownedFiles ?? [];
   const changes = await deps.git.diff(deps.agent);
   const validation = await deps.runValidation(deps.agent.rules.validationCommands);
-  const conflict = await deps.git.conflictCheck(deps.agent, deps.agent.defaultBranch || "main");
+  const conflict = await deps.git.conflictCheck(deps.agent, deps.agent.defaultBranch || "develop");
   const gates = evaluateQualityGates({
     diff: changes.diff,
     files: changes.files,

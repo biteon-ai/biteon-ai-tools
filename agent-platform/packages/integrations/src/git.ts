@@ -17,10 +17,10 @@ export class WorkspaceGit {
       const hasGit = await this.exec(agent, ["rev-parse", "--is-inside-work-tree"], "", cwd);
       if (hasGit.code !== 0) {
         if (checkout.url) await this.exec(agent, ["clone", checkout.url, "."], token, cwd);
-        else await this.exec(agent, ["init", "-b", agent.defaultBranch || "main"], "", cwd);
+        else await this.exec(agent, ["init", "-b", agent.defaultBranch || "develop"], "", cwd);
       }
       await this.ensureIdentity(agent, cwd);
-      await this.updateFromOrigin(agent, cwd, agent.defaultBranch || "main", token);
+      await this.updateFromOrigin(agent, cwd, agent.defaultBranch || "develop", token);
       const existing = await this.exec(agent, ["rev-parse", "--verify", "--quiet", branch], "", cwd);
       if (existing.code !== 0) await this.exec(agent, ["checkout", "-b", branch], "", cwd);
       else {
@@ -65,7 +65,7 @@ export class WorkspaceGit {
         token,
         targets: changed.map((checkout) => ({ name: checkout.name, host: checkout.host, apiOrigin: checkout.apiOrigin })),
         head: task.branchName,
-        base: agent.defaultBranch || "main",
+        base: agent.defaultBranch || "develop",
         title: task.title,
         ticket: task.externalId,
         ticketUrl: task.url,

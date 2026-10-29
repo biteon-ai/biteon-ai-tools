@@ -80,7 +80,7 @@ const CreateAgent = z.object({
   repositoryUrl: z.string().default(""),
   repositoryName: z.string().default(""),
   linkedRepositories: z.array(z.string()).max(8).default([]),
-  defaultBranch: z.string().min(1).default("main"),
+  defaultBranch: z.string().min(1).default("develop"),
   provider: z.enum(TASK_PROVIDERS).default("none"),
   boardId: z.string().default(""),
   boardName: z.string().default(""),
@@ -1116,7 +1116,7 @@ async function decide(deps: ServerDeps, request: FastifyRequest, reply: FastifyR
       const token = await repositoryToken(deps, agent);
       if (!token) return reply.code(409).send({ error: "Save a GitHub or GitLab token before merging this pull request into develop." });
       try {
-        const merged = await mergeApprovedChanges({ token, urls, base: "develop", fetchImpl: deps.fetchImpl });
+        const merged = await mergeApprovedChanges({ token, urls, base: agent?.defaultBranch || "develop", fetchImpl: deps.fetchImpl });
         mergedInto = merged.base;
       } catch (error) {
         const message = error instanceof Error ? error.message : "The pull request was not merged.";

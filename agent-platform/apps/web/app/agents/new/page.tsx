@@ -18,7 +18,7 @@ export default function NewAgentPage() {
     linkedRepositories: [] as string[],
     provider: "none",
     boardId: "",
-    defaultBranch: "main",
+    defaultBranch: "develop",
     executorKind: "fake",
     dailyCapacityHours: 8,
     boardKey: "",

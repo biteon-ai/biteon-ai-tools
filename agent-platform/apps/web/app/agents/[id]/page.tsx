@@ -166,7 +166,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
   const [ticketNote, setTicketNote] = useState<string | null>(null);
   const [shiftText, setShiftText] = useState<string | null>(null);
   const [custom, setCustom] = useState<{ text: string; reply: string } | null>(null);
-  const [config, setConfig] = useState({ name: "", description: "", provider: "none", boardName: "", boardId: "", repositoryUrl: "", repositoryName: "", linkedRepositories: [] as string[], defaultBranch: "main", dailyCapacityHours: 8, allowOverCapacity: false, executorKind: "fake", telegramChatId: "", boardKey: "", boardToken: "" });
+  const [config, setConfig] = useState({ name: "", description: "", provider: "none", boardName: "", boardId: "", repositoryUrl: "", repositoryName: "", linkedRepositories: [] as string[], defaultBranch: "develop", dailyCapacityHours: 8, allowOverCapacity: false, executorKind: "fake", telegramChatId: "", boardKey: "", boardToken: "" });
   const [workflowConfig, setWorkflowConfig] = useState<WorkflowForm | null>(null);
   const [savingConfig, setSavingConfig] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
@@ -192,7 +192,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
         repositoryUrl: agent.repositoryUrl ?? "",
         repositoryName: agent.repositoryName ?? "",
         linkedRepositories: agent.linkedRepositories ?? [],
-        defaultBranch: agent.defaultBranch ?? "main",
+        defaultBranch: agent.defaultBranch ?? "develop",
         dailyCapacityHours: agent.dailyCapacityHours ?? 8,
         allowOverCapacity: agent.allowOverCapacity ?? false,
         executorKind: agent.executorKind,
