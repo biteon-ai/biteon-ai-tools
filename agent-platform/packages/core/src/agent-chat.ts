@@ -29,9 +29,10 @@ export type ProjectIntent =
   | { kind: "tick" }
   | { kind: "sync" }
   | { kind: "progress"; query: string }
+  | { kind: "tokens" }
   | { kind: "out_of_scope" };
 
-export const PROJECT_HELP = "Commands: list the backlog, what has been done, status, howfar, any problems, start, pause, resume, restart, stop, tick, sync, push. Say “commands” for the full list. I only answer about this project.";
+export const PROJECT_HELP = "Commands: list the backlog, what has been done, status, howfar, tokens left, any problems, start, pause, resume, restart, stop, tick, sync, push. Say “commands” for the full list. I only answer about this project.";
 export const PROJECT_SCOPE = "I only talk about this project. Say “commands” to see what you can ask.";
 
 function normalizeChat(text: string): string {
@@ -47,6 +48,7 @@ export function interpretProjectChat(text: string): ProjectIntent {
   const lower = normalized.toLowerCase();
   if (!lower) return { kind: "out_of_scope" };
   if (/^(hi|hello|hey|help|commands|menu|list commands)$/.test(lower)) return { kind: "help" };
+  if (/^(?:\/)?tokens$/.test(lower) || (/\btokens?\b/.test(lower) && /\b(left|remaining|remain|balance|used|usage|limit|many)\b/.test(lower))) return { kind: "tokens" };
   if (/\brestart\b/.test(lower)) return { kind: "restart" };
   if (/\btick\b/.test(lower) && !/\b(ticket|pull request)\b/.test(lower)) return { kind: "tick" };
   if (/\bpush\b/.test(lower) && !/\b(ticket|pull request)\b/.test(lower)) return { kind: "push" };

@@ -1,4 +1,4 @@
-import { approveTask, columnForStage, decryptSecret, describeColumn, describeProblems, describeProgress, describeProject, describeTicket, findTickets, interpretProjectChat, mergeCards, parseTelegramCommand, PROJECT_SCOPE, rejectTask, shiftToTicket, ticketLabel, WorkflowError } from "@agent-platform/core";
+import { approveTask, columnForStage, decryptSecret, describeColumn, describePaidTokens, describeProblems, describeProgress, describeProject, describeTicket, findTickets, interpretProjectChat, isTokenLimitError, mergeCards, paidTokenReport, parseTelegramCommand, PROJECT_SCOPE, rejectTask, shiftToTicket, startOfUtcDay, ticketLabel, WorkflowError } from "@agent-platform/core";
 import type { PlatformStore } from "@agent-platform/db";
 import { createBoardClient, parseCredentials } from "@agent-platform/integrations";
 import { newId, nowIso, type Agent, type Task } from "@agent-platform/shared";
@@ -20,6 +20,7 @@ async function slashCommand(store: PlatformStore, parsed: { command: string; arg
     return scopedReport(store, agents, parsed.arg, parsed.command);
   }
   if (parsed.command === "/howfar") return progressReport(store, agents, parsed.arg);
+  if (parsed.command === "/tokens") return tokenReport(store, agents, parsed.arg);
   if (parsed.command === "/start" || parsed.command === "/push" || parsed.command === "/restart" || parsed.command === "/pause" || parsed.command === "/resume" || parsed.command === "/stop" || parsed.command === "/tick" || parsed.command === "/sync") {
     const resolved = resolveOne(agents, parsed.arg, parsed.command.slice(1));
     if (typeof resolved === "string") return resolved;
@@ -52,6 +53,8 @@ async function projectChat(store: PlatformStore, text: string, agents: Agent[], 
     const lines = [];
     for (const agent of targets) lines.push(describeProject(agent, await store.listTasks(agent.id), new Date()));
     reply = lines.join("\n\n");
+  } else if (intent.kind === "tokens") {
+    reply = await tokenReport(store, targets, "");
   } else if (intent.kind === "progress") {
     reply = await progressReport(store, targets, intent.query);
   } else if (intent.kind === "list" || intent.kind === "backlog" || intent.kind === "done" || intent.kind === "problems") {
@@ -158,13 +161,14 @@ function commandList(agents: Agent[]): string {
     "/sync <agent> — sync tickets from the board",
     "/status [agent]",
     "/howfar [agent] — percent done and how long the Doing ticket has been running",
+    "/tokens [agent] — tokens used today and tokens left on paid models",
     "/backlog [agent] — tickets in Backlog",
     "/done [agent] — what has been done",
     "/problems [agent]",
     "/approve <ticket>",
     "/reject <ticket>",
     "",
-    "You can also write: start, pause, resume, restart, stop, tick, sync, list the backlog, what has been done, any problems, what are you doing, howfar, work on <ticket>.",
+    "You can also write: start, pause, resume, restart, stop, tick, sync, list the backlog, what has been done, any problems, what are you doing, howfar, tokens left, work on <ticket>.",
     "Name the agent when more than one project is available.",
   ].join("\n");
 }
@@ -180,6 +184,33 @@ async function scopedReport(store: PlatformStore, agents: Agent[], arg: string, 
   if (targets.length === 0) return "No agents.";
   const lines = [];
   for (const agent of targets) lines.push(await reportFor(store, agent, command));
+  return lines.join("\n\n");
+}
+
+async function tokenReport(store: PlatformStore, agents: Agent[], query: string): Promise<string> {
+  const named = query ? findAgent(agents, query) : undefined;
+  if (query && !named) return "Agent not found.";
+  const targets = named ? [named] : agents;
+  if (targets.length === 0) return "No agents.";
+  const [assignments, models, providers, usage] = await Promise.all([
+    store.listAssignments(),
+    store.listModels(),
+    store.listProviders(),
+    store.usageSince(startOfUtcDay(new Date()).toISOString()),
+  ]);
+  const lines = [];
+  for (const agent of targets) {
+    const runs = await store.listRuns(agent.id);
+    const rows = paidTokenReport({
+      agentId: agent.id,
+      assignments,
+      models,
+      providers,
+      usage,
+      limitRuns: runs.filter((run) => run.costClass === "paid" && isTokenLimitError(run.error)).map((run) => ({ modelId: run.modelId, error: run.error })),
+    });
+    lines.push(describePaidTokens(agent.name, rows));
+  }
   return lines.join("\n\n");
 }
 

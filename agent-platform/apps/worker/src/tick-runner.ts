@@ -7,6 +7,7 @@ import {
   decryptSecret,
   executorForProvider,
   formatNotification,
+  isTokenLimitError,
   routeModel,
   scopeMemoryBody,
   guardAgentMerges,
@@ -53,14 +54,15 @@ export async function executeTick(input: {
   const gitClient = new WorkspaceGit(runtime);
   const choice = await chooseExecutor(input, agent, now, runtime);
   if ("error" in choice) {
+    const limit = isTokenLimitError(choice.error);
     await notify(input.store, agent.id, null, {
       agentName: agent.name,
       repository: agent.repositoryName,
       status: agent.status,
       severity: "urgent",
-      title: "No model available",
-      body: choice.error,
-      action: "Adjust the model assignment, budget, or provider.",
+      title: limit ? "Paid model has no tokens left" : "No model available",
+      body: limit ? `${choice.error} Ask “tokens left” to check the paid models in use.` : choice.error,
+      action: limit ? "Add tokens or switch the primary model." : "Adjust the model assignment, budget, or provider.",
     });
     return { action: "blocked", detail: choice.error };
   }
@@ -251,6 +253,11 @@ async function readCredentials(store: PlatformStore, agent: Agent, masterKey: st
 }
 
 async function notify(store: PlatformStore, agentId: string, taskId: string | null, draft: Parameters<typeof formatNotification>[0]) {
+  if (draft.title === "Paid model has no tokens left") {
+    const recent = await store.listNotifications(40);
+    const already = recent.some((item) => item.agentId === agentId && item.title === draft.title && Date.now() - Date.parse(item.createdAt) < 60 * 60 * 1000);
+    if (already) return;
+  }
   const notification: NotificationRecord = {
     id: newId(),
     agentId,

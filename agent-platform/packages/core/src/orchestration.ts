@@ -16,6 +16,7 @@ import { newId } from "@agent-platform/shared";
 import type { BoardClient } from "./board.js";
 import { mergeCards } from "./board.js";
 import { backoffMinutes, branchName, chooseIntake, columnForStage, estimateHours, remainingCapacity } from "./planning.js";
+import { isTokenLimitError } from "./tokens.js";
 import { buildTaskPrompt } from "./prompt.js";
 import { workspaceCheckouts } from "./repositories.js";
 import { evaluateQualityGates } from "./quality.js";
@@ -274,7 +275,16 @@ async function execute(deps: TickDeps, _tasks: Task[], task: Task, run: TaskRun,
     deps.scheduler.activeRunId = run.id;
     await deps.saveScheduler(deps.scheduler);
     await deps.saveTask(task);
-    await deps.notify(draft(deps, task, "warning", "Execution failed", run.error, "The agent will retry until the retry budget is exhausted."));
+    const limit = result.costClass === "paid" && isTokenLimitError(run.error);
+    const modelName = deps.model?.modelId || "The paid model";
+    await deps.notify(draft(
+      deps,
+      task,
+      limit ? "urgent" : "warning",
+      limit ? "Paid model has no tokens left" : "Execution failed",
+      limit ? `${modelName} has no tokens left or hit its limit. ${run.error}` : run.error,
+      limit ? "Add tokens or switch the primary model. Ask “tokens left” to check paid models." : "The agent will retry until the retry budget is exhausted.",
+    ));
     await rememberBuild(deps, task, "failed", run.error);
     return { action: "failed", taskId: task.id, detail: run.error };
   }

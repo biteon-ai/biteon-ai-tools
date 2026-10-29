@@ -35,7 +35,10 @@ import {
   formatNotification,
   hashPassword,
   mergeCards,
+  describePaidTokens,
   interpretProjectChat,
+  isTokenLimitError,
+  paidTokenReport,
   doingClock,
   describeDoingProgress,
   describeProgress,
@@ -672,7 +675,32 @@ describe("intake, models, and agent chat", () => {
     expect(interpretProjectChat("tick").kind).toBe("tick");
     expect(interpretProjectChat("sync the board").kind).toBe("sync");
     expect(interpretProjectChat("commands").kind).toBe("help");
+    expect(interpretProjectChat("how many tokens left")).toEqual({ kind: "tokens" });
     expect(interpretProjectChat("howfar")).toEqual({ kind: "progress", query: "" });
+    expect(isTokenLimitError("insufficient_quota")).toBe(true);
+    expect(isTokenLimitError("workspace dirty")).toBe(false);
+    const paidModel = {
+      id: "paid-1",
+      providerId: "p2",
+      modelId: "auto-smart",
+      displayName: "Cursor Auto",
+      costClass: "paid" as const,
+      enabled: true,
+      parameters: {},
+      createdAt: "2026-10-29T00:00:00.000Z",
+    };
+    const paidProvider = { id: "p2", name: "Cursor", type: "cursor" as const, baseUrl: "", costClass: "paid" as const, enabled: true, secretId: null, createdAt: "", updatedAt: "" };
+    const tokenAssignment = { id: "as-paid", agentId: null, activity: "coding" as const, modelId: "paid-1", fallbackModelId: null, maxTokens: 4000, dailyTokenBudget: 1000, allowLocalOnly: false, requirePaid: false };
+    const report = paidTokenReport({
+      agentId: "agent-1",
+      assignments: [tokenAssignment],
+      models: [paidModel],
+      providers: [paidProvider],
+      usage: [{ id: "u1", agentId: "agent-1", modelId: "auto-smart", activity: "coding", tokensIn: 200, tokensOut: 50, costClass: "paid", createdAt: "2026-10-29T01:00:00.000Z" }],
+      limitRuns: [],
+    });
+    expect(report[0]?.remaining).toBe(750);
+    expect(describePaidTokens("BitVox", report)).toContain("750 tokens left of 1000");
     expect(interpretProjectChat("how far is the realtime ticket")).toEqual({ kind: "progress", query: "realtime ticket" });
     expect(interpretProjectChat("how long has the ticket been in progress")).toEqual({ kind: "progress", query: "" });
     const started = "2026-10-29T10:00:00.000Z";

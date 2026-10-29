@@ -37,7 +37,11 @@ import {
   mergeCards,
   describeColumn,
   describeProblems,
+  describePaidTokens,
   describeProgress,
+  isTokenLimitError,
+  paidTokenReport,
+  startOfUtcDay,
   describeProject,
   describeTicket,
   findTickets,
@@ -495,6 +499,24 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (intent.kind === "backlog") replyText = refreshed.boardError && tasks.length === 0 ? refreshed.boardError : describeColumn(tasks, "backlog");
     if (intent.kind === "done") replyText = describeColumn(tasks, "done", 12);
     if (intent.kind === "progress") replyText = describeProgress(tasks, await deps.store.listRuns(agent.id), intent.query, new Date());
+    if (intent.kind === "tokens") {
+      const now = new Date();
+      const [assignments, models, providers, usage, runs] = await Promise.all([
+        deps.store.listAssignments(),
+        deps.store.listModels(),
+        deps.store.listProviders(),
+        deps.store.usageSince(startOfUtcDay(now).toISOString()),
+        deps.store.listRuns(agent.id),
+      ]);
+      replyText = describePaidTokens(agent.name, paidTokenReport({
+        agentId: agent.id,
+        assignments,
+        models,
+        providers,
+        usage,
+        limitRuns: runs.filter((run) => run.costClass === "paid" && isTokenLimitError(run.error)).map((run) => ({ modelId: run.modelId, error: run.error })),
+      }));
+    }
     if (intent.kind === "problems") {
       replyText = describeProblems(agent, tasks);
       if (refreshed.boardError) replyText = `${replyText}\n${refreshed.boardError}`;

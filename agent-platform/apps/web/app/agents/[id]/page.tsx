@@ -517,7 +517,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
       </section>
       <section className="card p-4">
         <h2 className="mb-1 font-medium">Chat / Control</h2>
-        <p className="mb-3 text-sm text-slate-400">Ask about this project: the backlog, what has been done, the status, or any problems. You can start, pause, resume, restart, stop, tick, or sync. Say “commands” for the full list.</p>
+        <p className="mb-3 text-sm text-slate-400">Ask about this project: the backlog, what has been done, the status, howfar, tokens left, or any problems. You can start, pause, resume, restart, stop, tick, or sync. Say “commands” for the full list.</p>
         <div className="mb-3 flex flex-wrap gap-2">
           <button className="btn-ghost" type="button" disabled={pending !== ""} onClick={() => void sendCommand("What are you working on?", "status")}>{pending === "status" ? "Checking…" : "What are you working on?"}</button>
           <button className="btn-ghost" type="button" disabled={pending !== ""} onClick={() => void sendCommand("List tickets", "list")}>{pending === "list" ? "Loading…" : "List tickets"}</button>
