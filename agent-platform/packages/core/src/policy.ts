@@ -34,6 +34,7 @@ const ALLOWED_GIT = new Set([
   "commit",
   "push",
   "fetch",
+  "pull",
   "clone",
   "rev-parse",
   "ls-files",
@@ -78,6 +79,7 @@ export function assertGitAllowed(args: string[], options?: { humanMergeApproval?
   if (args.length === 0) throw new PolicyError("empty git command");
   const [sub, ...rest] = args;
   if (sub === "merge" && !options?.humanMergeApproval) throw new PolicyError(MERGE_BLOCKED);
+  if (sub === "pull" && !rest.includes("--ff-only")) throw new PolicyError("git pull must be fast-forward only");
   if (!sub || !ALLOWED_GIT.has(sub)) throw new PolicyError(`git ${sub ?? ""} is not allowed`);
   const forbidden = rest.some((arg) => {
     const lower = arg.toLowerCase();

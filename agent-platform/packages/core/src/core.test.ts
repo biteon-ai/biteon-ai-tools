@@ -155,6 +155,8 @@ describe("policy", () => {
     expect(() => assertGitAllowed(["commit", "--no-verify", "-m", "x"])).toThrow(PolicyError);
     expect(() => assertGitAllowed(["branch", "-D", "main"])).toThrow(PolicyError);
     expect(() => assertGitAllowed(["checkout", "--", "file.ts"])).toThrow(PolicyError);
+    expect(() => assertGitAllowed(["pull", "origin", "main"])).toThrow(/fast-forward/);
+    expect(() => assertGitAllowed(["pull", "--ff-only", "origin", "main"])).not.toThrow();
     expect(() => assertGitAllowed(["merge", "develop"])).toThrow(/human approval/);
     expect(() => assertGitAllowed(["merge", "develop"], { humanMergeApproval: true })).not.toThrow();
     expect(() => assertCommandAllowed(["rm", "-rf", "/"], root)).toThrow(PolicyError);
@@ -565,6 +567,10 @@ describe("linked repositories", () => {
     expect(prompt).toContain("repo-primary");
     expect(prompt).toContain("repo-secondary");
     expect(prompt).toContain("One pull request is opened per repository");
+    expect(prompt).toContain("speckit.specify");
+    expect(prompt).toContain("speckit.plan");
+    expect(prompt).toContain("speckit.tasks");
+    expect(prompt).toContain("speckit.implement");
   });
 });
 

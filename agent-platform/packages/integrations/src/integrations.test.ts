@@ -1,4 +1,6 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -12,6 +14,8 @@ import { createPairingStore, memoryPairingStore, parsePairingStart, telegramDeep
 import { listProviderModels, readModelCatalog } from "./provider-models.js";
 import { listTrelloCards, readTrelloCardMove, registerTrelloWebhook, trelloListId } from "./trello.js";
 import { telegramBotProfile } from "./telegram.js";
+
+const gitFixture = promisify(execFile);
 
 describe("integrations", () => {
   it("parses Trello cards and GitHub project status without leaking tokens", async () => {
@@ -136,6 +140,81 @@ describe("integrations", () => {
     expect(head.stdout.trim()).toBe("Add note (task card-9)");
     await expect(runtime.exec(agent.id, "git", ["push", "--force"], { hostCwd: workspace, timeoutMs: 10000 })).rejects.toThrow(/destructive/);
     await expect(runtime.exec(agent.id, "git", ["merge", "develop"], { hostCwd: workspace, timeoutMs: 10000 })).rejects.toThrow(/human approval/);
+  });
+
+  it("clones when the workspace is empty and pulls the latest base before a new ticket", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "agent-sync-"));
+    const remote = path.join(root, "remote.git");
+    const runtime = new ProcessRuntime();
+    const agentId = newId();
+    await mkdir(remote, { recursive: true });
+    const fixture = (cwd: string, args: string[]) => gitFixture("git", args, { cwd });
+    await fixture(remote, ["init", "--bare", "-b", "main"]);
+    const seed = path.join(root, "seed");
+    await mkdir(seed, { recursive: true });
+    await fixture(seed, ["clone", remote, "."]);
+    await fixture(seed, ["config", "user.email", "agent@localhost"]);
+    await fixture(seed, ["config", "user.name", "Agent"]);
+    await writeFile(path.join(seed, "README.md"), "base\n", "utf8");
+    await fixture(seed, ["add", "README.md"]);
+    await fixture(seed, ["commit", "-m", "base"]);
+    await fixture(seed, ["push", "origin", "HEAD:main"]);
+    await writeFile(path.join(seed, "README.md"), "latest\n", "utf8");
+    await fixture(seed, ["commit", "-am", "latest"]);
+    await fixture(seed, ["push", "origin", "HEAD:main"]);
+    const agent: Agent = {
+      id: agentId,
+      name: "Repo Agent",
+      description: "",
+      status: "running",
+      repositoryUrl: "../remote.git",
+      repositoryName: "acme/repo",
+      linkedRepositories: [],
+      defaultBranch: "main",
+      provider: "none",
+      boardId: "",
+      boardName: "Repo",
+      workspacePath: path.join(root, "work"),
+      executorKind: "fake",
+      dailyCapacityHours: 8,
+      allowOverCapacity: false,
+      credentialSecretId: null,
+      telegramChatId: "",
+      rules: defaultRules(),
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    const task = {
+      id: "task-sync",
+      agentId,
+      externalId: "card-sync",
+      title: "Sync",
+      description: "",
+      acceptanceCriteria: "",
+      comments: [],
+      url: "",
+      stage: "doing" as const,
+      priority: 1,
+      estimateHours: 1,
+      dependsOn: [],
+      dueAt: null,
+      plan: "",
+      branchName: "agent/card-sync",
+      prUrl: "",
+      blockedReason: "",
+      exceptionNote: "",
+      checksPassed: false,
+      labels: [],
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    const prepared = await new WorkspaceGit(runtime).prepare(agent, task, []);
+    const checkout = path.join(root, "work");
+    const log = await runtime.exec(agentId, "git", ["log", "--oneline"], { hostCwd: checkout, timeoutMs: 10000 });
+    const branch = await runtime.exec(agentId, "git", ["branch", "--show-current"], { hostCwd: checkout, timeoutMs: 10000 });
+    expect(prepared.branch).toBe("agent/card-sync");
+    expect(log.stdout).toContain("latest");
+    expect(branch.stdout.trim()).toBe("agent/card-sync");
   });
 
   it("reports a conflict dry-run before review when the task branch diverges from the base", async () => {

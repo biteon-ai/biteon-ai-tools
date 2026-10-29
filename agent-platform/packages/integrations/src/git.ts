@@ -20,9 +20,14 @@ export class WorkspaceGit {
         else await this.exec(agent, ["init", "-b", agent.defaultBranch || "main"], "", cwd);
       }
       await this.ensureIdentity(agent, cwd);
-      const existing = await this.exec(agent, ["rev-parse", "--verify", branch], "", cwd);
+      await this.updateFromOrigin(agent, cwd, agent.defaultBranch || "main", token);
+      const existing = await this.exec(agent, ["rev-parse", "--verify", "--quiet", branch], "", cwd);
       if (existing.code !== 0) await this.exec(agent, ["checkout", "-b", branch], "", cwd);
-      else await this.exec(agent, ["checkout", branch], "", cwd);
+      else {
+        await this.exec(agent, ["checkout", branch], "", cwd);
+        const remoteBranch = await this.exec(agent, ["rev-parse", "--verify", "--quiet", `origin/${branch}`], "", cwd);
+        if (remoteBranch.code === 0) await this.exec(agent, ["pull", "--ff-only", "origin", branch], token, cwd);
+      }
       const status = await this.exec(agent, ["status", "--porcelain"], "", cwd);
       const dirty = status.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
       const owned = new Set(filesForCheckout(checkout, ownedFiles));
@@ -120,6 +125,23 @@ export class WorkspaceGit {
     return [{ role: "primary", name: "", url: "", directory: "", host: "github", apiOrigin: "https://api.github.com" }];
   }
 
+  private async updateFromOrigin(agent: Agent, cwd: string, base: string, token: string): Promise<void> {
+    const remote = await this.exec(agent, ["remote", "get-url", "origin"], "", cwd);
+    if (remote.code !== 0) {
+      const localBase = await this.exec(agent, ["rev-parse", "--verify", "--quiet", base], "", cwd);
+      if (localBase.code === 0) await this.exec(agent, ["checkout", base], "", cwd);
+      return;
+    }
+    await this.exec(agent, ["fetch", "origin"], token, cwd);
+    const originBase = await this.exec(agent, ["rev-parse", "--verify", "--quiet", `origin/${base}`], "", cwd);
+    if (originBase.code === 0) {
+      await this.exec(agent, ["checkout", "-B", base, `origin/${base}`], "", cwd);
+      return;
+    }
+    const localBase = await this.exec(agent, ["rev-parse", "--verify", "--quiet", base], "", cwd);
+    if (localBase.code === 0) await this.exec(agent, ["checkout", base], "", cwd);
+  }
+
   private async ensureIdentity(agent: Agent, cwd: string): Promise<void> {
     const name = await this.exec(agent, ["config", "user.name"], "", cwd);
     if (!name.stdout.trim()) await this.exec(agent, ["config", "user.name", agent.name], "", cwd);
@@ -130,7 +152,7 @@ export class WorkspaceGit {
   private async exec(agent: Agent, args: string[], token = "", cwd = agent.workspacePath) {
     assertGitAllowed(args);
     const env: Record<string, string> = {};
-    if (token && (args[0] === "push" || args[0] === "clone" || args[0] === "fetch")) {
+    if (token && (args[0] === "push" || args[0] === "clone" || args[0] === "fetch" || args[0] === "pull")) {
       env.GIT_CONFIG_COUNT = "1";
       env.GIT_CONFIG_KEY_0 = "http.extraHeader";
       env.GIT_CONFIG_VALUE_0 = `AUTHORIZATION: bearer ${token}`;
