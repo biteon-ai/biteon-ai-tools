@@ -7,13 +7,17 @@ import { Chip } from "../../components/ui";
 
 interface Provider { id: string; name: string; type: string; costClass: string; baseUrl: string; credential: { configured: boolean; hint: string } }
 interface Model { id: string; displayName: string; modelId: string; costClass: string; providerId: string }
+interface Assignment { agentId: string | null; activity: string; modelId: string }
 
 const PAID = new Set(["openai", "anthropic", "cursor", "codex"]);
+const ACTIVITIES = ["planning", "coding", "testing", "review"];
+const PRIMARY_ACTIVITIES = ["planning", "coding", "testing"];
 
 export default function ModelsPage() {
   const toast = useToast();
   const [providers, setProviders] = useState<Provider[]>([]);
   const [models, setModels] = useState<Model[]>([]);
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [provider, setProvider] = useState({ name: "Ollama", type: "ollama", baseUrl: "http://host.docker.internal:11434/v1", costClass: "local", apiKey: "" });
   const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
   const [savingProvider, setSavingProvider] = useState(false);
@@ -21,6 +25,7 @@ export default function ModelsPage() {
   const [catalog, setCatalog] = useState<{ id: string; displayName: string }[]>([]);
   const [catalogNote, setCatalogNote] = useState("");
   const [loadingCatalog, setLoadingCatalog] = useState(false);
+  const [primaryOnAdd, setPrimaryOnAdd] = useState(false);
 
   function costFor(type: string): string {
     if (type === "ollama") return "local";
@@ -29,10 +34,23 @@ export default function ModelsPage() {
   }
 
   async function load() {
-    const [nextProviders, nextModels] = await Promise.all([api<Provider[]>("/api/providers"), api<Model[]>("/api/models")]);
+    const [nextProviders, nextModels, nextAssignments] = await Promise.all([
+      api<Provider[]>("/api/providers"),
+      api<Model[]>("/api/models"),
+      api<Assignment[]>("/api/assignments"),
+    ]);
     setProviders(nextProviders);
     setModels(nextModels);
+    setAssignments(nextAssignments);
     if (nextProviders[0]) setModel((current) => current.providerId ? current : { ...current, providerId: nextProviders[0]!.id, costClass: nextProviders[0]!.costClass });
+  }
+
+  function globalAssignments(): Assignment[] {
+    return assignments.filter((item) => item.agentId === null);
+  }
+
+  function isPrimary(item: Model): boolean {
+    return globalAssignments().some((assignment) => assignment.activity === "coding" && assignment.modelId === item.id);
   }
 
   useEffect(() => { void load().catch((err: Error) => toast(err.message, "error")); }, [toast]);
@@ -123,20 +141,39 @@ export default function ModelsPage() {
       return;
     }
     try {
-      await api("/api/models", { method: "POST", body: JSON.stringify(model) });
+      const saved = await api<Model>("/api/models", { method: "POST", body: JSON.stringify(model) });
+      if (primaryOnAdd) await saveActivities(saved, PRIMARY_ACTIVITIES);
+      setPrimaryOnAdd(false);
       await load();
-      toast(`${model.displayName} added`, "success");
+      toast(primaryOnAdd ? `${model.displayName} added as the primary model` : `${model.displayName} added`, "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not add the model", "error");
     }
   }
 
+  async function saveActivities(item: Model, activities: string[]) {
+    for (const activity of activities) {
+      await api("/api/assignments", { method: "PUT", body: JSON.stringify({ activity, modelId: item.id, agentId: null, fallbackModelId: null, maxTokens: 4000, dailyTokenBudget: null, allowLocalOnly: false, requirePaid: false }) });
+    }
+  }
+
   async function assign(activity: string, item: Model) {
     try {
-      await api("/api/assignments", { method: "PUT", body: JSON.stringify({ activity, modelId: item.id, agentId: null, fallbackModelId: null, maxTokens: 4000, dailyTokenBudget: null, allowLocalOnly: false, requirePaid: false }) });
+      await saveActivities(item, [activity]);
+      await load();
       toast(`${activity} now uses ${item.displayName}`, "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not assign the model", "error");
+    }
+  }
+
+  async function makePrimary(item: Model) {
+    try {
+      await saveActivities(item, PRIMARY_ACTIVITIES);
+      await load();
+      toast(`${item.displayName} is the primary model`, "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not set the primary model", "error");
     }
   }
 
@@ -226,7 +263,7 @@ export default function ModelsPage() {
       <section className="space-y-3">
         <div>
           <h2 className="text-sm font-medium text-slate-200">Models</h2>
-          <p className="text-sm text-slate-500">Each provider loads its own model list. Pick one, change the display name if you want, then add it.</p>
+          <p className="text-sm text-slate-500">Each provider loads its own model list. The primary model is listed first and runs planning, coding, and testing.</p>
         </div>
         <form onSubmit={addModel} autoComplete="off" className="card space-y-4 p-4 md:p-5">
           <div className="grid gap-4 md:grid-cols-2">
@@ -260,29 +297,36 @@ export default function ModelsPage() {
               <div className="flex h-[38px] items-center"><Chip>{model.costClass || "Set by the provider"}</Chip></div>
             </label>
           </div>
-          <div className="flex justify-end border-t border-slate-800 pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-4">
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              <input type="checkbox" aria-label="Make this the primary model" checked={primaryOnAdd} onChange={(event) => setPrimaryOnAdd(event.target.checked)} />
+              Make this the primary model
+            </label>
             <button className="btn" type="submit" disabled={providers.length === 0 || !model.modelId || loadingCatalog}>{loadingCatalog ? "Loading models…" : "Add model"}</button>
           </div>
         </form>
         {models.length === 0 ? <p className="text-sm text-slate-500">No models yet.</p> : (
           <ul className="space-y-2">
-            {models.map((item) => {
+            {[...models].sort((left, right) => Number(isPrimary(right)) - Number(isPrimary(left))).map((item) => {
               const owner = providers.find((providerItem) => providerItem.id === item.providerId);
+              const primary = isPrimary(item);
+              const assigned = new Set(globalAssignments().filter((assignment) => assignment.modelId === item.id).map((assignment) => assignment.activity));
               return (
-                <li key={item.id} className="card px-4 py-3">
+                <li key={item.id} className={`card px-4 py-3 ${primary ? "border-sky-500/60" : ""}`}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium">{item.displayName}</span>
+                        {primary ? <Chip>Primary</Chip> : null}
                         <Chip>{item.costClass}</Chip>
                         {owner ? <Chip>{owner.name}</Chip> : null}
                       </div>
                       <p className="truncate font-mono text-xs text-slate-500">{item.modelId}</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs text-slate-500">Assign</span>
-                      {["planning", "coding", "testing", "review"].map((activity) => (
-                        <button key={activity} className="btn-ghost capitalize" onClick={() => void assign(activity, item)} type="button">{activity}</button>
+                      <button className={primary ? "btn" : "btn-ghost"} type="button" disabled={primary} onClick={() => void makePrimary(item)}>{primary ? "Primary" : "Make primary"}</button>
+                      {ACTIVITIES.map((activity) => (
+                        <button key={activity} className={`${assigned.has(activity) ? "btn" : "btn-ghost"} capitalize`} onClick={() => void assign(activity, item)} type="button">{activity}</button>
                       ))}
                     </div>
                   </div>
