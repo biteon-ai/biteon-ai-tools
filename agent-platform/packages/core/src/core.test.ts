@@ -574,6 +574,18 @@ describe("linked repositories", () => {
     expect(prompt).toContain("speckit.plan");
     expect(prompt).toContain("speckit.tasks");
     expect(prompt).toContain("speckit.implement");
+    const withoutSpeckit = defaultRules();
+    withoutSpeckit.skills.speckit = false;
+    const skipped = buildTaskPrompt({
+      agentName: "Stack Agent",
+      repository: "acme/web, acme/api",
+      task: task({ title: "Add export" }),
+      memories: [],
+      rules: withoutSpeckit,
+      checkouts,
+    });
+    expect(skipped).toContain("Speckit is turned off");
+    expect(skipped).not.toContain("speckit.specify");
   });
 });
 

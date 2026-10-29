@@ -20,7 +20,7 @@ interface Rules {
   skills: Record<string, boolean>;
   customSkills?: Skill[];
 }
-interface Skill { id: string; name: string; description: string }
+interface Skill { id: string; name: string; description: string; defaultEnabled?: boolean }
 
 const ICONS: Record<string, IconName> = {
   "security-audit": "shield",
@@ -35,11 +35,44 @@ const ICONS: Record<string, IconName> = {
   "migration-review": "database",
   "cicd-validation": "workflow",
   "threat-model": "target",
+  speckit: "spark",
 };
+
+function skillOn(rules: Rules, skill: Skill): boolean {
+  const value = rules.skills[skill.id];
+  if (typeof value === "boolean") return value;
+  return Boolean(skill.defaultEnabled);
+}
 
 const DEFAULT_STANDARDS = "Follow SOLID where it matches the codebase. Prefer the project's existing patterns. Keep the change scoped to the task. Create one branch per task from the base branch and keep every commit on that branch. Do not commit on develop, main, or master. Resolve conflicts on the task branch before review.";
 const DEFAULT_TESTS = "Run the configured validation commands. Add or update tests when behavior changes. Each command must exit 0 before Review. A failing command blocks the pull request. Empty validation is not allowed.";
 const DEFAULT_WORKFLOW = "Before Review, run a Git conflict dry-run against the base branch and stop if it conflicts. Never execute git merge develop. Never auto-merge a pull request. A merge is allowed only after a human approval from the UI or Telegram /approve is stored for the task.";
+
+function SkillSwitches({ rules, skills, onChange, onRemove }: { rules: Rules; skills: Skill[]; onChange: (rules: Rules) => void; onRemove: (skill: Skill) => void }) {
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {skills.map((skill) => {
+        const enabled = skillOn(rules, skill);
+        const customSkill = (rules.customSkills ?? []).some((item) => item.id === skill.id);
+        return (
+          <article key={skill.id} className={`card flex items-start gap-3 p-4 transition ${enabled ? "border-sky-500/40" : "hover:border-slate-700"}`}>
+            <span className={`mt-0.5 rounded-lg border border-slate-800 p-2 ${enabled ? "text-sky-300" : "text-slate-400"}`}>
+              <Icon name={ICONS[skill.id] ?? "spark"} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h3 className="font-medium">{skill.name}</h3>
+              <p className="mt-1 text-sm text-slate-400">{skill.description}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              {customSkill ? <button type="button" className="btn-ghost text-rose-300" aria-label={`Remove ${skill.name}`} onClick={() => void onRemove(skill)}>Remove</button> : null}
+              <Toggle checked={enabled} label={skill.name} onChange={(value) => onChange({ ...rules, skills: { ...rules.skills, [skill.id]: value } })} />
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
 
 function commandsFrom(rules: Rules): string[] {
   return rules.validationCommands.map((argv) => argv.join(" "));
@@ -81,7 +114,7 @@ export default function RulesPage() {
     const allOn = { ...Object.fromEntries(skills.map((skill) => [skill.id, true])), ...customFlags };
     const secretsOnly = { ...Object.fromEntries(skills.map((skill) => [skill.id, skill.id === "secrets-scan"])), ...customFlags };
     if (name === "default") {
-      const defaults = { ...Object.fromEntries(skills.map((skill) => [skill.id, ["security-audit", "secrets-scan", "dependency-review", "static-analysis", "test-generation", "migration-review", "cicd-validation"].includes(skill.id)])), ...customFlags };
+      const defaults = { ...Object.fromEntries(skills.map((skill) => [skill.id, Boolean(skill.defaultEnabled)])), ...customFlags };
       setRules({
         ...rules,
         codingStandards: DEFAULT_STANDARDS,
@@ -196,27 +229,26 @@ export default function RulesPage() {
         <span>Allow review when no validation commands are configured</span>
         <Toggle checked={rules.allowEmptyChecks} label="Allow review when no validation commands are configured" onChange={(allowEmptyChecks) => setRules({ ...rules, allowEmptyChecks })} />
       </label>
-      <div className="grid gap-3 md:grid-cols-2">
-        {[...skills, ...(rules.customSkills ?? [])].map((skill) => {
-          const enabled = Boolean(rules.skills[skill.id]);
-          const customSkill = (rules.customSkills ?? []).some((item) => item.id === skill.id);
-          return (
-            <article key={skill.id} className={`card flex items-start gap-3 p-4 transition ${enabled ? "border-sky-500/40" : "hover:border-slate-700"}`}>
-              <span className={`mt-0.5 rounded-lg border border-slate-800 p-2 ${enabled ? "text-sky-300" : "text-slate-400"}`}>
-                <Icon name={ICONS[skill.id] ?? "spark"} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <h3 className="font-medium">{skill.name}</h3>
-                <p className="mt-1 text-sm text-slate-400">{skill.description}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                {customSkill ? <button type="button" className="btn-ghost text-rose-300" aria-label={`Remove ${skill.name}`} onClick={() => void removeCustomSkill(skill)}>Remove</button> : null}
-                <Toggle checked={enabled} label={skill.name} onChange={(value) => setRules({ ...rules, skills: { ...rules.skills, [skill.id]: value } })} />
-              </div>
-            </article>
-          );
-        })}
-      </div>
+      {skills.filter((skill) => skill.id === "speckit").map((skill) => {
+        const enabled = skillOn(rules, skill);
+        return (
+          <article key={skill.id} className={`card flex items-start gap-3 p-4 ${enabled ? "border-sky-500/40" : ""}`}>
+            <span className={`mt-0.5 rounded-lg border border-slate-800 p-2 ${enabled ? "text-sky-300" : "text-slate-400"}`}>
+              <Icon name="spark" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h2 className="font-medium">Speckit</h2>
+              <p className="mt-1 text-sm text-slate-400">{skill.description}</p>
+            </div>
+            <Toggle checked={enabled} label="Speckit" onChange={(value) => {
+              const next: Record<string, boolean> = { ...rules.skills, speckit: value };
+              for (const key of Object.keys(next)) if (key.startsWith("speckit-")) delete next[key];
+              setRules({ ...rules, skills: next });
+            }} />
+          </article>
+        );
+      })}
+      <SkillSwitches rules={rules} skills={[...skills.filter((skill) => skill.id !== "speckit"), ...(rules.customSkills ?? [])]} onChange={setRules} onRemove={removeCustomSkill} />
       <div className="card grid gap-2 p-4 md:grid-cols-[1fr_2fr_auto]">
         <input className="input" aria-label="Custom skill name" placeholder="Skill name" value={custom.name} onChange={(event) => setCustom({ ...custom, name: event.target.value })} />
         <input className="input" aria-label="Custom skill description" placeholder="What should the agent do with this skill?" value={custom.description} onChange={(event) => setCustom({ ...custom, description: event.target.value })} />

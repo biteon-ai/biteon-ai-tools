@@ -1,6 +1,31 @@
 import type { AgentRules, Memory, Task } from "@agent-platform/shared";
 import type { Checkout } from "./repositories.js";
-import { SKILLS } from "@agent-platform/shared";
+import { SKILLS, skillEnabled } from "@agent-platform/shared";
+
+const SPECKIT_STEPS = [
+  "speckit.constitution, only when the project has no constitution yet.",
+  "speckit.specify, from this ticket.",
+  "speckit.clarify, only when the spec still has open questions.",
+  "speckit.plan.",
+  "speckit.tasks.",
+  "speckit.analyze, against the current code.",
+  "speckit.checklist, against the current code.",
+  "speckit.implement.",
+  "speckit.converge, only when the code drifted from the spec.",
+];
+
+function speckitInstructions(skills: Record<string, boolean>): string[] {
+  if (!skillEnabled(skills, "speckit")) {
+    return ["Speckit is turned off for this agent. Plan the change, implement only what the task requires, and leave validation to the platform."];
+  }
+  return [
+    "Speckit is on. Follow these commands in this order, using the repository Speckit skills when .cursor/skills or .specify is present:",
+    ...SPECKIT_STEPS.map((instruction, index) => `${index + 1}. ${instruction}`),
+    "Do not run speckit.taskstoissues. The ticket already exists on the board.",
+    "Do not start speckit.implement until specify, plan, and tasks exist for this ticket.",
+    "Leave validation to the platform.",
+  ];
+}
 
 export function wrapUntrusted(label: string, content: string): string {
   const safe = content.replaceAll("</untrusted-data>", "<\\/untrusted-data>");
@@ -22,7 +47,7 @@ export function buildTaskPrompt(input: {
 }): string {
   const custom = input.rules.customSkills ?? [];
   const skillNotes = [
-    ...SKILLS.filter((skill) => input.rules.skills[skill.id]).map((skill) => `- ${skill.name}: ${skill.description}`),
+    ...SKILLS.filter((skill) => skillEnabled(input.rules.skills, skill.id)).map((skill) => `- ${skill.name}: ${skill.description}`),
     ...custom.filter((skill) => input.rules.skills[skill.id]).map((skill) => `- ${skill.name}: ${skill.description}`),
   ].join("\n");
   const memoryNotes = input.memories
@@ -41,17 +66,7 @@ export function buildTaskPrompt(input: {
     `Agent: ${input.agentName}`,
     ...layout,
     "The workspace already contains the latest base branch. Read that code before writing anything.",
-    "Speckit is the default for every ticket. Follow these commands in order, using the repository Speckit skills when .cursor/skills or .specify is present:",
-    "1. speckit.constitution, only when the project has no constitution yet.",
-    "2. speckit.specify, from this ticket.",
-    "3. speckit.clarify, only when the spec still has open questions.",
-    "4. speckit.plan.",
-    "5. speckit.tasks.",
-    "6. speckit.analyze and speckit.checklist, against the current code.",
-    "7. speckit.implement.",
-    "8. speckit.converge, only when the code drifted from the spec.",
-    "Do not run speckit.taskstoissues. The ticket already exists on the board.",
-    "Do not start speckit.implement until specify, plan, and tasks exist for this ticket. Leave validation to the platform.",
+    ...speckitInstructions(input.rules.skills),
     "Do not claim the task is done. Do not move workflow state.",
     "",
     "Project rules:",

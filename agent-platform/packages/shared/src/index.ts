@@ -123,7 +123,14 @@ export const SKILLS: SkillDefinition[] = [
   { id: "migration-review", name: "Migration review", description: "Flag database migration files for human attention.", defaultEnabled: true },
   { id: "cicd-validation", name: "CI/CD validation", description: "Treat pipeline config changes as review notes.", defaultEnabled: true },
   { id: "threat-model", name: "Threat modeling", description: "Ask the executor to record abuse cases for security-sensitive changes.", defaultEnabled: false },
+  { id: "speckit", name: "Speckit", description: "For every ticket, run speckit.constitution, speckit.specify, speckit.clarify, speckit.plan, speckit.tasks, speckit.analyze, speckit.checklist, speckit.implement, and speckit.converge in that order.", defaultEnabled: true },
 ];
+
+export function skillEnabled(skills: Record<string, boolean> | undefined, id: string): boolean {
+  const value = skills?.[id];
+  if (typeof value === "boolean") return value;
+  return SKILLS.find((skill) => skill.id === id)?.defaultEnabled ?? false;
+}
 
 export function defaultRules(): AgentRules {
   return {
