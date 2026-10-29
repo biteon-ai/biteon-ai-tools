@@ -41,6 +41,17 @@ body {
   to { transform: rotate(360deg); }
 }
 
+.progress-live {
+  background-image: linear-gradient(90deg, #0284c7 0%, #7dd3fc 45%, #0284c7 100%);
+  background-size: 200% 100%;
+  animation: progress-slide 1.4s linear infinite;
+}
+
+@keyframes progress-slide {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
 a { color: inherit; text-decoration: none; }
 
 input, textarea, select, button {

@@ -162,6 +162,28 @@ describe("worker tick", () => {
     expect(await handleTelegramCommand(store, "commands", masterKey)).toContain("/sync");
     expect(await handleTelegramCommand(store, "tell me a joke", masterKey)).toContain("only talk about this project");
     expect(await handleTelegramCommand(store, "work on Add invoice export", masterKey)).toContain("Already working");
+    const doing = (await store.listTasks(agent.id))[0]!;
+    await store.createRun({
+      id: newId(),
+      taskId: doing.id,
+      agentId: agent.id,
+      executorId: "llm",
+      status: "running",
+      activity: "coding",
+      modelId: "",
+      costClass: "none",
+      summary: "",
+      error: "",
+      tokensIn: 0,
+      tokensOut: 0,
+      startedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+      finishedAt: null,
+    });
+    const far = await handleTelegramCommand(store, "howfar", masterKey);
+    expect(far).toContain("Add invoice export");
+    expect(far).toContain("% of 100%");
+    expect(far).toContain("In progress for");
+    expect(await handleTelegramCommand(store, "howfar BitVox", masterKey)).toContain("Nothing is in Doing");
   });
 
   it("keeps a task in progress when validation fails", async () => {

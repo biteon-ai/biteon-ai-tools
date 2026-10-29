@@ -36,6 +36,9 @@ import {
   hashPassword,
   mergeCards,
   interpretProjectChat,
+  doingClock,
+  describeDoingProgress,
+  describeProgress,
   parseAgentCommand,
   parseTelegramCommand,
   PolicyError,
@@ -663,6 +666,18 @@ describe("intake, models, and agent chat", () => {
     expect(interpretProjectChat("tick").kind).toBe("tick");
     expect(interpretProjectChat("sync the board").kind).toBe("sync");
     expect(interpretProjectChat("commands").kind).toBe("help");
+    expect(interpretProjectChat("howfar")).toEqual({ kind: "progress", query: "" });
+    expect(interpretProjectChat("how far is the realtime ticket")).toEqual({ kind: "progress", query: "realtime ticket" });
+    expect(interpretProjectChat("how long has the ticket been in progress")).toEqual({ kind: "progress", query: "" });
+    const started = "2026-10-29T10:00:00.000Z";
+    const now = new Date("2026-10-29T10:30:00.000Z");
+    expect(doingClock(started, 1, now.getTime()).percent).toBe(50);
+    expect(doingClock(started, 1, new Date("2026-10-29T12:00:00.000Z").getTime()).percent).toBeLessThan(100);
+    const active = task({ id: "doing", externalId: "card-1", stage: "doing", title: "Health", estimateHours: 1, updatedAt: started });
+    expect(describeDoingProgress(active, started, now)).toContain("50% of 100%");
+    expect(describeDoingProgress(active, started, now)).toContain("In progress for 30m");
+    expect(describeProgress([active], [{ taskId: active.id, status: "running", startedAt: started }], "", now)).toContain("About 30m left");
+    expect(describeProgress([waiting], [], "", now)).toBe("Nothing is in Doing.");
     expect(parseAgentCommand("List tickets").kind).toBe("list");
     expect(parseAgentCommand("Shift to ticket #card-9")).toEqual({ kind: "shift", ticket: "card-9" });
     expect(describeAgentStatus([current, waiting], 8, new Date("2026-10-28T12:00:00.000Z"))).toContain("#card-1");

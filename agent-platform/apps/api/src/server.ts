@@ -37,6 +37,7 @@ import {
   mergeCards,
   describeColumn,
   describeProblems,
+  describeProgress,
   describeProject,
   describeTicket,
   findTickets,
@@ -480,7 +481,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!agent) return;
     const body = z.object({ message: z.string().trim().min(1).max(500) }).parse(request.body);
     const intent = interpretProjectChat(body.message);
-    const readsBoard = intent.kind === "status" || intent.kind === "list" || intent.kind === "backlog" || intent.kind === "done" || intent.kind === "problems" || intent.kind === "about" || intent.kind === "ticket";
+    const readsBoard = intent.kind === "status" || intent.kind === "list" || intent.kind === "backlog" || intent.kind === "done" || intent.kind === "problems" || intent.kind === "about" || intent.kind === "ticket" || intent.kind === "progress";
     const refreshed = readsBoard ? await refreshBoardTasks(deps, agent) : { tasks: await deps.store.listTasks(agent.id), boardError: null };
     const tasks = refreshed.tasks;
     let replyText = PROJECT_SCOPE;
@@ -493,6 +494,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (intent.kind === "list") replyText = refreshed.boardError && tasks.length === 0 ? refreshed.boardError : describeTickets(tasks);
     if (intent.kind === "backlog") replyText = refreshed.boardError && tasks.length === 0 ? refreshed.boardError : describeColumn(tasks, "backlog");
     if (intent.kind === "done") replyText = describeColumn(tasks, "done", 12);
+    if (intent.kind === "progress") replyText = describeProgress(tasks, await deps.store.listRuns(agent.id), intent.query, new Date());
     if (intent.kind === "problems") {
       replyText = describeProblems(agent, tasks);
       if (refreshed.boardError) replyText = `${replyText}\n${refreshed.boardError}`;

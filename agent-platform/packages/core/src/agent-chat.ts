@@ -28,9 +28,10 @@ export type ProjectIntent =
   | { kind: "stop" }
   | { kind: "tick" }
   | { kind: "sync" }
+  | { kind: "progress"; query: string }
   | { kind: "out_of_scope" };
 
-export const PROJECT_HELP = "Commands: list the backlog, what has been done, status, any problems, start, pause, resume, restart, stop, tick, sync, push. Say “commands” for the full list. I only answer about this project.";
+export const PROJECT_HELP = "Commands: list the backlog, what has been done, status, howfar, any problems, start, pause, resume, restart, stop, tick, sync, push. Say “commands” for the full list. I only answer about this project.";
 export const PROJECT_SCOPE = "I only talk about this project. Say “commands” to see what you can ask.";
 
 function normalizeChat(text: string): string {
@@ -56,6 +57,9 @@ export function interpretProjectChat(text: string): ProjectIntent {
   if (/\b(problem|problems|wrong|stuck|blocked|failed)\b/.test(lower)) return { kind: "problems" };
   if (/\b(been done|completed work|finished work)\b/.test(lower) || /^(?:what(?:'s| is| has) been done|list done|show done|done|completed|finished)$/.test(lower) || (/\b(list|show|what)\b/.test(lower) && /\b(done|completed|finished)\b/.test(lower))) return { kind: "done" };
   if (/\bbacklog\b/.test(lower)) return { kind: "backlog" };
+  const far = lower.match(/^(?:\/)?how\s*far(?:\s+(?:is|on|with|for))?\s*(.*)$/) ?? (/\bhowfar\b/.test(lower) ? ["", ""] : null);
+  if (far) return { kind: "progress", query: ticketQuery(far[1] ?? "") };
+  if (/^how long$/.test(lower) || (/\bhow long\b/.test(lower) && /\b(progress|doing|ticket|working|running|taking)\b/.test(lower))) return { kind: "progress", query: "" };
   const decision = lower.match(/^(approve|accept|reject|decline)(?:\s+(?:ticket\s+)?#?\s*(.+))?$/);
   if (decision) {
     const kind = decision[1] === "approve" || decision[1] === "accept" ? "approve" : "reject";

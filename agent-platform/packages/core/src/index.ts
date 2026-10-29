@@ -15,4 +15,5 @@ export * from "./notify.js";
 export * from "./orchestration.js";
 export * from "./repositories.js";
 export * from "./agent-chat.js";
+export * from "./progress.js";
 export * from "./merge-guard.js";

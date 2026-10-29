@@ -39,10 +39,10 @@ interface WorkflowForm {
 interface Detail {
   agent: AgentRecord;
   workflow: WorkflowRecord | null;
-  tasks: { id: string; externalId: string; title: string; description?: string; stage: string; prUrl: string; boardPosition?: number; branchName?: string; checksPassed?: boolean; exceptionNote?: string; blockedReason: string }[];
+  tasks: { id: string; externalId: string; title: string; description?: string; acceptanceCriteria?: string; estimateHours?: number | null; updatedAt?: string; stage: string; prUrl: string; boardPosition?: number; branchName?: string; checksPassed?: boolean; exceptionNote?: string; blockedReason: string }[];
   events: { id: string; message: string; createdAt: string }[];
   memories: { id: string; kind: string; title: string; body: string; revision: number }[];
-  runs: { id: string; taskId?: string; status: string; summary: string; error?: string; costClass: string }[];
+  runs: { id: string; taskId?: string; status: string; startedAt?: string; summary: string; error?: string; costClass: string }[];
 }
 
 const CONFIG_COLUMNS = [
@@ -91,6 +91,59 @@ function taskColumns(tasks: Detail["tasks"]) {
   const extras = [...new Set(tasks.map((task) => task.stage).filter((stage) => !known.has(stage) && (stage === "blocked" || stage === "failed")))]
     .map((stage) => ({ stage, label: stage === "blocked" ? "Blocked" : "Failed" }));
   return [...BOARD_COLUMNS, ...extras].map((column) => ({ ...column, tasks: byColumnOrder(tasks.filter((task) => task.stage === column.stage)) }));
+}
+
+function estimateHours(task: Pick<Detail["tasks"][number], "estimateHours" | "description" | "acceptanceCriteria">): number {
+  if (task.estimateHours && task.estimateHours > 0) return task.estimateHours;
+  const words = `${task.description ?? ""} ${task.acceptanceCriteria ?? ""}`.trim().split(/\s+/).filter(Boolean).length;
+  if (words > 400) return 8;
+  if (words > 150) return 4;
+  return 2;
+}
+
+function doingClock(startedAt: string, hours: number, now: number): { percent: number; elapsedMs: number; estimateMs: number; remainingMs: number } {
+  const estimateMs = Math.max(hours, 0.25) * 3_600_000;
+  const started = Date.parse(startedAt);
+  const elapsedMs = Math.max(0, now - (Number.isFinite(started) ? started : now));
+  const ratio = elapsedMs / estimateMs;
+  const percent = ratio <= 0.95 ? Math.round(ratio * 100) : Math.min(99, Math.round(95 + 4 * (1 - Math.exp(-(ratio - 0.95) * 2))));
+  return { percent, elapsedMs, estimateMs, remainingMs: Math.max(0, estimateMs - elapsedMs) };
+}
+
+function formatDuration(ms: number): string {
+  const minutes = Math.max(0, Math.round(ms / 60_000));
+  if (minutes < 1) return "under a minute";
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours === 0) return `${minutes}m`;
+  if (rest === 0) return `${hours}h`;
+  return `${hours}h ${rest}m`;
+}
+
+function doingStartedAt(task: Detail["tasks"][number], runs: Detail["runs"]): string {
+  const related = runs.filter((run) => run.taskId === task.id && run.startedAt);
+  const running = related.filter((run) => run.status === "running");
+  const pool = running.length > 0 ? running : related;
+  if (pool.length === 0) return task.updatedAt ?? new Date().toISOString();
+  return [...pool].sort((left, right) => (left.startedAt ?? "").localeCompare(right.startedAt ?? ""))[0]!.startedAt!;
+}
+
+function DoingMeter({ task, runs }: { task: Detail["tasks"][number]; runs: Detail["runs"] }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 5000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const clock = doingClock(doingStartedAt(task, runs), estimateHours(task), now);
+  const left = clock.remainingMs > 0 ? `about ${formatDuration(clock.remainingMs)} left` : `past the ${formatDuration(clock.estimateMs)} estimate`;
+  return (
+    <div className="mt-3">
+      <div className="h-1.5 overflow-hidden rounded-full bg-slate-800" role="progressbar" aria-valuenow={clock.percent} aria-valuemin={0} aria-valuemax={100} aria-label={`${clock.percent}% of 100%`}>
+        <div className="progress-live h-full rounded-full" style={{ width: `${Math.max(clock.percent, 4)}%` }} />
+      </div>
+      <p className="mt-1 text-xs text-slate-400">{clock.percent}% of 100% · {formatDuration(clock.elapsedMs)} in · {left}</p>
+    </div>
+  );
 }
 
 function securityStatus(task: Detail["tasks"][number], runs: Detail["runs"]): "Passed" | "Not passed" {
@@ -160,7 +213,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
     const timer = window.setInterval(() => {
       void api<Detail>(`/api/agents/${id}`).then((detail) => {
         const rows = orderedTicketRows(detail.tasks.map((task) => ({ externalId: task.externalId, title: task.title, stage: task.stage, boardPosition: task.boardPosition })));
-        setData((current) => current ? { ...current, tasks: detail.tasks, events: detail.events } : detail);
+        setData((current) => current ? { ...current, tasks: detail.tasks, events: detail.events, runs: detail.runs } : detail);
         setTickets((current) => current === null ? current : rows);
       }).catch(() => undefined);
     }, 15000);
@@ -514,6 +567,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
                       <button type="button" className="w-full rounded-lg border border-slate-800 bg-slate-900 p-3 text-left text-sm hover:border-slate-600" onClick={() => setSelectedId(task.id)}>
                         <p className="font-medium leading-5">{task.title}</p>
                         <p className="mt-1 text-xs text-slate-500">#{task.externalId}</p>
+                        {column.stage === "doing" ? <DoingMeter task={task} runs={data.runs} /> : null}
                         {task.blockedReason ? <p className="mt-2 text-xs text-amber-300">{task.blockedReason}</p> : null}
                       </button>
                     </li>
@@ -592,6 +646,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
               </div>
               <button type="button" className="btn-ghost" onClick={() => setSelectedId(null)}>Close</button>
             </div>
+            {selected.stage === "doing" ? <div className="mb-4"><DoingMeter task={selected} runs={data.runs} /></div> : null}
             {selected.description ? <p className="mb-4 whitespace-pre-wrap text-sm text-slate-300">{selected.description}</p> : null}
             {selected.blockedReason ? <p className="mb-4 text-sm text-amber-300">{selected.blockedReason}</p> : null}
             {selected.stage === "review" ? (
