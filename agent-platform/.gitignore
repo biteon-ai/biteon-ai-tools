@@ -1,0 +1,12 @@
+node_modules
+.pnpm-store
+.next
+dist
+coverage
+.env
+.env.local
+*.log
+backups
+.DS_Store
+workspaces
+tsconfig.tsbuildinfo
