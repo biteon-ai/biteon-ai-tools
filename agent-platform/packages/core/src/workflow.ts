@@ -63,10 +63,11 @@ export function importStage(stage: Stage, _now: string): Pick<Task, "stage" | "c
     return { stage: "done", checksPassed: false, exceptionNote: "Imported as already done on the board.", historicalApproval: true };
   }
   if (stage === "review") {
+    // Board Review without agent validation is not real Review — queue for the agent.
     return {
-      stage: "review",
+      stage: "todo",
       checksPassed: false,
-      exceptionNote: "Imported from the board while already in review.",
+      exceptionNote: "Board was in Review without agent validation; queued for Grill-me → Speckit → implement → PR.",
       historicalApproval: false,
     };
   }

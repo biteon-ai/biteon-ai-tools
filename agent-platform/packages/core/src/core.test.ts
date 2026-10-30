@@ -58,6 +58,7 @@ import {
   transitionTask,
   verifyPassword,
   WorkflowError,
+  inferTaskCheckouts,
   workspaceCheckouts,
   wrapUntrusted,
 } from "./index.js";
@@ -164,6 +165,9 @@ describe("policy", () => {
     expect(() => assertGitAllowed(["pull", "--ff-only", "origin", "main"])).not.toThrow();
     expect(() => assertGitAllowed(["merge", "develop"])).toThrow(/human approval/);
     expect(() => assertGitAllowed(["merge", "develop"], { humanMergeApproval: true })).not.toThrow();
+    expect(() => assertGitAllowed(["worktree", "list", "--porcelain"])).not.toThrow();
+    expect(() => assertGitAllowed(["worktree", "remove", "--force", "/tmp/wt"])).not.toThrow();
+    expect(() => assertGitAllowed(["worktree", "add", "/tmp/wt", "main"])).toThrow(PolicyError);
     expect(() => assertCommandAllowed(["rm", "-rf", "/"], root)).toThrow(PolicyError);
     expect(() => assertCommandAllowed(["git", "push", "origin", "HEAD:refs/heads/agent/card"], root)).not.toThrow();
   });
@@ -595,6 +599,41 @@ describe("agent tick", () => {
     expect(merged.notices.length).toBe(1);
   });
 
+  it("imports board Review cards as To Do until the agent opens a PR", () => {
+    const merged = mergeCards("agent-1", [], [{
+      externalId: "card-review",
+      title: "DPIA",
+      description: "",
+      acceptanceCriteria: "",
+      columnName: "Review",
+      url: "",
+      comments: [],
+      labels: [],
+      dueAt: null,
+      priority: 1,
+    }], DEFAULT_COLUMNS);
+    expect(merged.tasks[0]?.stage).toBe("todo");
+    expect(merged.tasks[0]?.checksPassed).toBe(false);
+    expect(merged.tasks[0]?.prUrl).toBe("");
+  });
+
+  it("demotes ghost Review cards that have no PR", () => {
+    const current = task({ stage: "review", checksPassed: false, prUrl: "" });
+    const merged = mergeCards("agent-1", [current], [{
+      externalId: current.externalId,
+      title: current.title,
+      description: current.description,
+      acceptanceCriteria: "",
+      columnName: "Review",
+      url: "",
+      comments: [],
+      labels: [],
+      dueAt: null,
+      priority: 1,
+    }], DEFAULT_COLUMNS);
+    expect(merged.tasks[0]?.stage).toBe("todo");
+  });
+
   it("follows a board move back to an earlier column", () => {
     const current = task({ stage: "doing", title: "Text conversation runner" });
     const merged = mergeCards("agent-1", [current], [{
@@ -654,10 +693,13 @@ describe("linked repositories", () => {
       memories: [],
       rules: defaultRules(),
       checkouts,
+      targetCheckouts: [checkouts[0]!],
     });
     expect(prompt).toContain("repo-primary");
     expect(prompt).toContain("repo-secondary");
-    expect(prompt).toContain("One pull request is opened per repository");
+    expect(prompt).toContain("This ticket targets: acme/web (repo-primary)");
+    expect(prompt).toContain("← edit for this ticket");
+    expect(prompt).toContain("One pull request is opened per edited repository");
     expect(prompt).toContain("Run enabled skills in the numbered order below");
     expect(prompt).toContain("Grill-me is on");
     expect(prompt).toContain("Enabled skills (fixed order):");
@@ -667,6 +709,39 @@ describe("linked repositories", () => {
     expect(prompt).toContain("speckit.plan");
     expect(prompt).toContain("speckit.tasks");
     expect(prompt).toContain("speckit.implement");
+    expect(prompt).toContain("NNN-short-name");
+    expect(prompt).toContain("Do not create agent/");
+  });
+
+  it("infers BitVox core vs console targets from the ticket text", () => {
+    const checkouts = workspaceCheckouts({
+      repositoryName: "biteon-ai/bitvox-core",
+      repositoryUrl: "https://github.com/biteon-ai/bitvox-core.git",
+      linkedRepositories: ["biteon-ai/bitvox-console"],
+    });
+    const consoleOnly = inferTaskCheckouts(
+      task({ title: "Polish the console dashboard UI", description: "Next.js settings page in the console" }),
+      checkouts,
+    );
+    expect(consoleOnly.map((item) => item.name)).toEqual(["biteon-ai/bitvox-console"]);
+    const coreOnly = inferTaskCheckouts(
+      task({ title: "Telnyx AMD on outbound", description: "Update the Python voice backend in bitvox-core" }),
+      checkouts,
+    );
+    expect(coreOnly.map((item) => item.name)).toEqual(["biteon-ai/bitvox-core"]);
+    const both = inferTaskCheckouts(
+      task({ title: "Human takeover for chat and WhatsApp", description: "API in core and console staff inbox UI" }),
+      checkouts,
+    );
+    expect(both.map((item) => item.name)).toEqual(["biteon-ai/bitvox-core", "biteon-ai/bitvox-console"]);
+  });
+
+  it("keeps Speckit skip messaging when Speckit is off", () => {
+    const checkouts = workspaceCheckouts({
+      repositoryName: "acme/web",
+      repositoryUrl: "https://gitlab.example.com/acme/web.git",
+      linkedRepositories: ["acme/api"],
+    });
     const withoutSpeckit = defaultRules();
     withoutSpeckit.skills.speckit = false;
     const skipped = buildTaskPrompt({

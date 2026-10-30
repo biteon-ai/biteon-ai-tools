@@ -139,6 +139,14 @@ export class MemoryStore implements PlatformStore {
         .slice(0, limit),
     );
   }
+  async listEventsForTask(taskId: string, limit = 200): Promise<TaskEvent[]> {
+    return clone(
+      this.events
+        .filter((event) => event.taskId === taskId)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, limit),
+    );
+  }
   async saveCheckpoint(checkpoint: Checkpoint): Promise<Checkpoint> {
     this.checkpoints.push(clone(checkpoint));
     return clone(checkpoint);
@@ -146,6 +154,15 @@ export class MemoryStore implements PlatformStore {
   async latestCheckpoint(taskRunId: string): Promise<Checkpoint | null> {
     const rows = this.checkpoints.filter((checkpoint) => checkpoint.taskRunId === taskRunId);
     return clone(rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null);
+  }
+  async listCheckpointsForRuns(runIds: string[]): Promise<Checkpoint[]> {
+    if (runIds.length === 0) return [];
+    const wanted = new Set(runIds);
+    return clone(
+      this.checkpoints
+        .filter((checkpoint) => wanted.has(checkpoint.taskRunId))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    );
   }
   async createApproval(approval: Approval): Promise<Approval> {
     this.approvals.push(clone(approval));

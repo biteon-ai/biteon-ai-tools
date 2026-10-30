@@ -23,6 +23,11 @@ const pairing = createPairingStore({
 let telegramOffset = 0;
 let running = true;
 
+// Drop locks left by a previous worker process so a restart cannot stall all ticks.
+void connection.keys("lock:agent-tick:*").then(async (keys) => {
+  if (keys.length > 0) await connection.del(...keys);
+}).catch(() => undefined);
+
 const worker = new Worker(AGENT_TICK_QUEUE, async (job) => {
   if (job.name === "board-sync" || job.name === "trello-board-sync") {
     await syncConnectedBoards(store, env.APP_MASTER_KEY);
@@ -30,7 +35,17 @@ const worker = new Worker(AGENT_TICK_QUEUE, async (job) => {
   }
   const agentId = String(job.data.agentId ?? "");
   if (!agentId) return;
-  await executeTick({ store, agentId, runtime, masterKey: env.APP_MASTER_KEY });
+  // Serialize ticks per agent even when WORKER_CONCURRENCY > 1.
+  const lockKey = `lock:agent-tick:${agentId}`;
+  const lockToken = `${job.id ?? "job"}:${Date.now()}`;
+  const locked = await connection.set(lockKey, lockToken, "EX", 900, "NX");
+  if (!locked) return;
+  try {
+    await executeTick({ store, agentId, runtime, masterKey: env.APP_MASTER_KEY });
+  } finally {
+    const current = await connection.get(lockKey);
+    if (current === lockToken) await connection.del(lockKey);
+  }
 }, { connection, concurrency: env.WORKER_CONCURRENCY });
 
 void queue.upsertJobScheduler("trello-board-sync", { every: 60_000 }, {

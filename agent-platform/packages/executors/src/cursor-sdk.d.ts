@@ -9,8 +9,21 @@ declare module "@cursor/sdk" {
     result?: string;
   }
 
+  export type CursorStreamMessage =
+    | {
+        type: "assistant";
+        message: { content: Array<{ type: "text"; text: string } | { type: "tool_use"; name: string }> };
+      }
+    | { type: "thinking"; text: string; thinking_duration_ms?: number }
+    | { type: "tool_call"; name: string; status: "running" | "completed" | "error"; args?: unknown; result?: unknown }
+    | { type: "status"; status: string; message?: string }
+    | { type: "task"; status?: string; text?: string }
+    | { type: string; [key: string]: unknown };
+
   export interface CursorRun {
     id?: string;
+    supports?(operation: "stream" | "wait" | "cancel" | "conversation"): boolean;
+    stream?(): AsyncGenerator<CursorStreamMessage, void>;
     wait(): Promise<CursorRunResult>;
   }
 

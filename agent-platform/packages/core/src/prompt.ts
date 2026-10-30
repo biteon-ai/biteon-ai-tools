@@ -40,6 +40,8 @@ function speckitInstructions(skills: Record<string, boolean>): string[] {
     ...SPECKIT_STEPS.map((instruction, index) => `${index + 1}. ${instruction}`),
     "Do not run speckit.taskstoissues. The ticket already exists on the board.",
     "Do not start speckit.implement until specify, plan, and tasks exist for this ticket.",
+    "Branch naming: use Speckit’s NNN-short-name branch (for example 044-chat-takeover). Create it during speckit.specify from the base branch. Do not create agent/… branches.",
+    "After implement, leave the work committed on that Speckit branch. The platform validates, pushes, opens the PR, and only then moves the ticket to Review.",
     "Leave validation to the platform.",
   ];
 }
@@ -74,6 +76,7 @@ export function buildTaskPrompt(input: {
   memories: Memory[];
   rules: AgentRules;
   checkouts?: Checkout[];
+  targetCheckouts?: Checkout[];
 }): string {
   const enabledSkills = orderedEnabledSkills(input.rules);
   const skillNotes = enabledSkills
@@ -83,12 +86,19 @@ export function buildTaskPrompt(input: {
     .map((memory) => `- [${memory.kind}] ${memory.title}: ${memory.body}`)
     .join("\n");
   const checkouts = input.checkouts ?? [];
+  const targets = input.targetCheckouts ?? checkouts;
+  const targetKeys = new Set(targets.map((checkout) => `${checkout.directory}:${checkout.name}`));
   const layout = checkouts.length > 1
     ? [
-      "Repositories:",
-      ...checkouts.map((checkout) => `- ${checkout.role} ${checkout.name} in ${checkout.directory} (/app/workspace/${checkout.directory})`),
-      "Read every repository before editing. Implement the ticket across the repositories it affects in the same change.",
-      "Validation runs in each directory. One pull request is opened per repository, and each request references the ticket and the other requests.",
+      "Repositories in this workspace:",
+      ...checkouts.map((checkout) => {
+        const marked = targetKeys.has(`${checkout.directory}:${checkout.name}`) ? " ← edit for this ticket" : " ← read-only unless the ticket clearly needs it";
+        return `- ${checkout.role} ${checkout.name} in ${checkout.directory} (/app/workspace/${checkout.directory})${marked}`;
+      }),
+      `This ticket targets: ${targets.map((checkout) => `${checkout.name} (${checkout.directory || "."})`).join(", ") || "all configured repositories"}.`,
+      "Put each change only in the repository that owns that code. Backend/API/voice/brain work belongs in the primary repo; console/UI/Next.js work belongs in the secondary repo.",
+      "Do not invent work in a repository this ticket does not need. When several repos are targeted, keep the change coherent.",
+      "Validation runs per repository directory. One pull request is opened per edited repository, and each request references the ticket and the other requests.",
     ]
     : [`Repository: ${input.repository}`];
   return [

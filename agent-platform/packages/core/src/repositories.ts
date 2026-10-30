@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { Agent } from "@agent-platform/shared";
+import type { Agent, Task } from "@agent-platform/shared";
 
 export interface Checkout {
   role: "primary" | "secondary";
@@ -102,4 +102,49 @@ export function containerCloneEnv(checkouts: Checkout[]): Record<string, string>
   if (primary) env.PRIMARY_REPO_URL = primary.url;
   if (secondary.length > 0) env.SECONDARY_REPO_URLS = secondary.map((checkout) => checkout.url).join(" ");
   return env;
+}
+
+/** Pick which linked checkouts a ticket should edit. Falls back to all when unclear. */
+export function inferTaskCheckouts(
+  task: Pick<Task, "title" | "description" | "acceptanceCriteria" | "labels">,
+  checkouts: Checkout[],
+): Checkout[] {
+  if (checkouts.length <= 1) return checkouts;
+  const text = [task.title, task.description, task.acceptanceCriteria, ...(task.labels ?? [])]
+    .join("\n")
+    .toLowerCase();
+  const byName = checkouts.filter((checkout) => {
+    const full = checkout.name.toLowerCase();
+    const short = (full.split("/")[1] ?? full).toLowerCase();
+    return Boolean(full) && (text.includes(full) || (short.length > 2 && text.includes(short)));
+  });
+  if (byName.length > 0) return uniqueCheckouts(byName);
+
+  const wantsConsole = /\b(console|frontend|next\.?js|\bui\b|dashboard|widget|web chat)\b/i.test(text);
+  const wantsCore = /\b(core|backend|python|fastapi|voice|telnyx|realtime|brain|api service)\b/i.test(text);
+  if (wantsConsole && wantsCore) return checkouts;
+
+  const selected: Checkout[] = [];
+  for (const checkout of checkouts) {
+    const name = checkout.name.toLowerCase();
+    if (wantsConsole && /console|frontend|web|ui|dashboard|portal/.test(name)) selected.push(checkout);
+    if (wantsCore && /(?:^|\/)(?:bitvox-)?core\b|api|backend|server|brain|worker/.test(name)) selected.push(checkout);
+  }
+  if (wantsConsole && selected.length === 0) {
+    selected.push(...checkouts.filter((checkout) => checkout.role === "secondary"));
+  }
+  if (wantsCore && selected.length === 0) {
+    selected.push(...checkouts.filter((checkout) => checkout.role === "primary"));
+  }
+  return selected.length > 0 ? uniqueCheckouts(selected) : checkouts;
+}
+
+function uniqueCheckouts(checkouts: Checkout[]): Checkout[] {
+  const seen = new Set<string>();
+  return checkouts.filter((checkout) => {
+    const key = `${checkout.directory}:${checkout.name}`.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }

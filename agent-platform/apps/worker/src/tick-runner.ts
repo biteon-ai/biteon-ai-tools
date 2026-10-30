@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import {
   DockerRuntime,
@@ -90,6 +91,7 @@ export async function executeTick(input: {
       commitAndPush: (current, task, owned, message) => gitClient.commitAndPush(current, task, owned, message, gitToken),
       diff: (current) => gitClient.diff(current),
       conflictCheck: (current, baseBranch) => gitClient.conflictCheck(current, baseBranch),
+      currentBranches: (current) => gitClient.currentBranches(current),
     },
     notify: async (draft) => {
       const taskId = draft.taskTitle ? (await input.store.listTasks(agent.id)).find((task) => task.title === draft.taskTitle)?.id ?? null : null;
@@ -113,6 +115,17 @@ export async function executeTick(input: {
     },
     latestCheckpoint: (runId) => input.store.latestCheckpoint(runId),
     findRun: (runId) => input.store.findRun(runId),
+    reportProgress: async ({ taskId, kind, message, metadata }) => {
+      await input.store.addEvent({
+        id: newId(),
+        agentId: agent.id,
+        taskId,
+        kind,
+        message,
+        metadata: metadata ?? {},
+        createdAt: nowIso(),
+      });
+    },
     remember: async ({ task, phase, note }) => {
       const ref = `task:${task.id}`;
       const body = scopeMemoryBody(task, phase, note);
@@ -220,9 +233,14 @@ async function validate(runtime: AgentRuntime, agent: Agent, commands: string[][
     for (const argv of commands) {
       const [file, ...args] = argv;
       if (!file) return { passed: false, detail: "empty validation command" };
+      const cwd = validationCwd(root, file, args);
+      if (!cwd) {
+        details.push(`${label}: skipped ${argv.join(" ")} (not applicable in this repo)`);
+        continue;
+      }
       try {
-        const result = await runtime.exec(agent.id, file, args, { hostCwd: root, timeoutMs: 120000 });
-        details.push(`${label}: ${argv.join(" ")} exited ${result.code}`);
+        const result = await runtime.exec(agent.id, file, args, { hostCwd: cwd, timeoutMs: 600000 });
+        details.push(`${path.relative(agent.workspacePath, cwd) || "."}: ${argv.join(" ")} exited ${result.code}`);
         if (result.code !== 0) return { passed: false, detail: details.join("; ") };
       } catch (error) {
         return { passed: false, detail: error instanceof Error ? error.message : "validation command rejected" };
@@ -230,6 +248,19 @@ async function validate(runtime: AgentRuntime, agent: Agent, commands: string[][
     }
   }
   return { passed: true, detail: details.join("; ") };
+}
+
+function validationCwd(root: string, file: string, args: string[]): string | null {
+  const bin = path.basename(file);
+  if (bin === "pnpm" || bin === "npm" || bin === "yarn" || bin === "npx") {
+    return existsSync(path.join(root, "package.json")) ? root : null;
+  }
+  if (bin === "pytest" || (bin === "python3" || bin === "python") && args.includes("pytest")) {
+    if (existsSync(path.join(root, "pytest.ini")) || existsSync(path.join(root, "pyproject.toml")) || existsSync(path.join(root, "tests"))) return root;
+    if (existsSync(path.join(root, "backend", "tests"))) return path.join(root, "backend");
+    return null;
+  }
+  return root;
 }
 
 async function recordUsage(store: PlatformStore, run: TaskRun) {

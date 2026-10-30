@@ -78,13 +78,23 @@ export function mergeCards(agentId: string, tasks: Task[], cards: ExternalCard[]
       });
       continue;
     }
+    // Review is only entered by the agent after Grill-me → Speckit → implement → push/PR.
+    // Never trust the board for that promotion.
     if (remote === "review" && existing.stage !== "review" && existing.stage !== "done") {
-      if (!existing.checksPassed) {
-        notices.push({
-          taskId: existing.id,
-          message: `${existing.title} was moved to Review on the board before local validation passed`,
-        });
-      }
+      notices.push({
+        taskId: existing.id,
+        message: `${existing.title} was moved to Review on the board before the agent opened a PR`,
+      });
+      continue;
+    }
+    // Ghost Review cards (board-imported, no checks/PR) go back to To Do.
+    if (existing.stage === "review" && !existing.checksPassed && !existing.prUrl) {
+      existing.stage = "todo";
+      existing.exceptionNote = existing.exceptionNote || "Returned to To Do: Review requires agent implementation and a pull request.";
+      notices.push({
+        taskId: existing.id,
+        message: `${existing.title} left Review because it has no validated PR yet`,
+      });
       continue;
     }
     // Keep local blocked/exception — board often still shows Doing, which would

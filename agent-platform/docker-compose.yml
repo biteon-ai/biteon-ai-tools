@@ -105,7 +105,7 @@ services:
       <<: *timezone
       API_INTERNAL_URL: http://api:4000
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
     depends_on:
       api:
         condition: service_healthy

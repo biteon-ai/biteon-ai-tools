@@ -15,10 +15,10 @@ import type {
 import { newId } from "@agent-platform/shared";
 import type { BoardClient } from "./board.js";
 import { mergeCards } from "./board.js";
-import { backoffMinutes, branchName, chooseIntake, columnForStage, estimateHours, remainingCapacity } from "./planning.js";
+import { backoffMinutes, branchName, chooseIntake, columnForStage, estimateHours, isSpeckitBranch, remainingCapacity, usesSpeckitBranches } from "./planning.js";
 import { isTokenLimitError } from "./tokens.js";
 import { buildTaskPrompt } from "./prompt.js";
-import { workspaceCheckouts } from "./repositories.js";
+import { inferTaskCheckouts, workspaceCheckouts } from "./repositories.js";
 import { evaluateQualityGates } from "./quality.js";
 import type { NotificationDraft } from "./notify.js";
 import { formatDurationMinutes, formatReasonBlock } from "./notify.js";
@@ -29,6 +29,7 @@ export interface GitClient {
   commitAndPush(agent: Agent, task: Task, ownedFiles: string[], message: string): Promise<{ prUrl: string }>;
   diff(agent: Agent): Promise<{ diff: string; files: string[] }>;
   conflictCheck(agent: Agent, baseBranch: string): Promise<{ clean: boolean; detail: string }>;
+  currentBranches?(agent: Agent): Promise<string[]>;
 }
 
 export interface TickDeps {
@@ -51,6 +52,7 @@ export interface TickDeps {
   saveCheckpoint: (checkpoint: Checkpoint) => Promise<void>;
   latestCheckpoint: (runId: string) => Promise<Checkpoint | null>;
   findRun: (runId: string) => Promise<TaskRun | null>;
+  reportProgress?: (input: { taskId: string; kind: string; message: string; metadata?: Record<string, unknown> }) => Promise<void>;
   recordApproval: (taskId: string, source: "board" | "import", comment: string) => Promise<void>;
   runValidation: (commands: string[][]) => Promise<{ passed: boolean; detail: string }>;
   remember?: (input: { task: Task; phase: "start" | "review" | "failed"; note: string }) => Promise<Memory>;
@@ -89,7 +91,17 @@ export async function runAgentTick(deps: TickDeps): Promise<TickResult> {
   }
 
   const doing = tasks.filter((task) => task.stage === "doing");
-  if (doing.length > 0) return continueTask(deps, tasks, doing[0]!);
+  if (doing.length > 0) {
+    // Prefer the task bound to the active run. Board sync can leave multiple cards in Doing,
+    // and preparing the wrong branch in a shared workspace causes git index.lock races.
+    let selected = doing[0]!;
+    if (deps.scheduler.activeRunId) {
+      const active = await deps.findRun(deps.scheduler.activeRunId);
+      const match = active ? tasks.find((task) => task.id === active.taskId) : undefined;
+      if (match) selected = match;
+    }
+    return continueTask(deps, tasks, selected);
+  }
 
   const remaining = remainingCapacity(deps.agent.dailyCapacityHours, tasks, deps.now);
   const intake = chooseIntake({
@@ -244,8 +256,9 @@ async function execute(deps: TickDeps, _tasks: Task[], task: Task, run: TaskRun,
     await deps.notify(draft(deps, blocked, "urgent", "Foreign changes detected", formatReasonBlock(reasons), "Clean up or claim the unexpected files before the agent continues."));
     return { action: "blocked", taskId: task.id, detail: "dirty workspace" };
   }
-  task.branchName = prepared.branch;
+  task.branchName = prepared.branch || task.branchName;
   const checkouts = workspaceCheckouts(deps.agent);
+  const targetCheckouts = inferTaskCheckouts(task, checkouts);
   const started = await rememberBuild(deps, task, "start", task.plan || "");
   const memories = started ? [started, ...deps.memories.filter((memory) => memory.id !== started.id)] : deps.memories;
   const prompt = buildTaskPrompt({
@@ -255,8 +268,10 @@ async function execute(deps: TickDeps, _tasks: Task[], task: Task, run: TaskRun,
     memories,
     rules: deps.agent.rules,
     checkouts,
+    targetCheckouts,
   });
   let result: ExecutorResult;
+  let progressStep = checkpoint?.step ?? 0;
   try {
     result = await deps.executor.run({
       runId: run.id,
@@ -276,6 +291,38 @@ async function execute(deps: TickDeps, _tasks: Task[], task: Task, run: TaskRun,
       checkpoint: checkpoint
         ? { step: checkpoint.step, note: checkpoint.note, ownedFiles: checkpoint.ownedFiles }
         : null,
+      onProgress: async (update) => {
+        if (!deps.reportProgress) return;
+        await deps.reportProgress({
+          taskId: task.id,
+          kind: `executor_${update.kind}`,
+          message: update.text,
+          metadata: {
+            runId: run.id,
+            tool: update.tool,
+            status: update.status,
+            progressKind: update.kind,
+            path: update.path,
+            snippet: update.snippet,
+          },
+        });
+        if (update.kind === "tool" && update.status === "completed") {
+          progressStep += 1;
+          await deps.saveCheckpoint({
+            id: newId(),
+            taskRunId: run.id,
+            agentId: deps.agent.id,
+            step: progressStep,
+            note: update.snippet
+              ? `${update.text.slice(0, 120)}\n${update.snippet.slice(0, 120)}`
+              : update.text.slice(0, 240),
+            ownedFiles: update.path
+              ? [...new Set([...(checkpoint?.ownedFiles ?? []), update.path])]
+              : checkpoint?.ownedFiles ?? [],
+            createdAt: new Date().toISOString(),
+          });
+        }
+      },
     });
   } catch (error) {
     result = {
@@ -288,6 +335,13 @@ async function execute(deps: TickDeps, _tasks: Task[], task: Task, run: TaskRun,
       checkpoint: checkpoint ? { step: checkpoint.step, note: checkpoint.note, ownedFiles: checkpoint.ownedFiles } : null,
       error: error instanceof Error ? error.message : "executor failed",
     };
+  }
+  // Prefer the Speckit NNN-short-name branch created during specify/implement.
+  if (deps.git.currentBranches) {
+    const heads = await deps.git.currentBranches(deps.agent);
+    const speckit = heads.find((name) => isSpeckitBranch(name));
+    if (speckit) task.branchName = speckit;
+    else if (!task.branchName && heads[0] && heads.every((name) => name === heads[0])) task.branchName = heads[0]!;
   }
   if (result.checkpoint) {
     await deps.saveCheckpoint({
@@ -335,8 +389,9 @@ async function execute(deps: TickDeps, _tasks: Task[], task: Task, run: TaskRun,
     await rememberBuild(deps, task, "failed", run.error);
     return { action: "failed", taskId: task.id, detail: run.error };
   }
-  const owned = result.checkpoint?.ownedFiles ?? [];
   const changes = await deps.git.diff(deps.agent);
+  // Cursor often returns an empty ownedFiles list; commit whatever the run left dirty.
+  const owned = (result.checkpoint?.ownedFiles?.length ? result.checkpoint.ownedFiles : changes.files);
   const validation = await deps.runValidation(deps.agent.rules.validationCommands);
   const conflict = await deps.git.conflictCheck(deps.agent, deps.agent.defaultBranch || "develop");
   const gates = evaluateQualityGates({
@@ -396,6 +451,34 @@ async function execute(deps: TickDeps, _tasks: Task[], task: Task, run: TaskRun,
     await rememberBuild(deps, task, "failed", detail);
     return { action: "failed", taskId: task.id, detail };
   }
+  if (!task.branchName) {
+    const detail = usesSpeckitBranches(deps.agent.rules.branchPattern)
+      ? "Speckit did not leave an NNN-short-name branch checked out; cannot push or open a PR."
+      : "No task branch was created; cannot push or open a PR.";
+    run.status = "failed";
+    run.error = detail;
+    await deps.updateRun(run);
+    deps.scheduler.consecutiveFailures += 1;
+    deps.scheduler.retryAt = new Date(deps.now.getTime() + backoffMinutes(deps.scheduler.consecutiveFailures) * 60000).toISOString();
+    await deps.saveScheduler(deps.scheduler);
+    await deps.saveTask(task);
+    await deps.notify(draft(deps, task, "warning", "Review blocked", formatReasonBlock([detail]), "Finish Speckit specify/implement on an NNN-short-name branch."));
+    await rememberBuild(deps, task, "failed", detail);
+    return { action: "failed", taskId: task.id, detail };
+  }
+  if (usesSpeckitBranches(deps.agent.rules.branchPattern) && !isSpeckitBranch(task.branchName)) {
+    const detail = `Speckit branch required (NNN-short-name). Current branch is ${task.branchName}.`;
+    run.status = "failed";
+    run.error = detail;
+    await deps.updateRun(run);
+    deps.scheduler.consecutiveFailures += 1;
+    deps.scheduler.retryAt = new Date(deps.now.getTime() + backoffMinutes(deps.scheduler.consecutiveFailures) * 60000).toISOString();
+    await deps.saveScheduler(deps.scheduler);
+    await deps.saveTask(task);
+    await deps.notify(draft(deps, task, "warning", "Review blocked", formatReasonBlock([detail]), "Use Speckit specify so the branch is named like 044-chat-takeover."));
+    await rememberBuild(deps, task, "failed", detail);
+    return { action: "failed", taskId: task.id, detail };
+  }
   const committed = await deps.git.commitAndPush(
     deps.agent,
     task,
@@ -403,6 +486,19 @@ async function execute(deps: TickDeps, _tasks: Task[], task: Task, run: TaskRun,
     `${task.title} (task ${task.externalId})`,
   );
   task.prUrl = committed.prUrl || task.prUrl;
+  if (!task.prUrl) {
+    const detail = "Push/PR required before Review. Configure the GitHub repository token and ensure the Speckit branch can be pushed.";
+    run.status = "failed";
+    run.error = detail;
+    await deps.updateRun(run);
+    deps.scheduler.consecutiveFailures += 1;
+    deps.scheduler.retryAt = new Date(deps.now.getTime() + backoffMinutes(deps.scheduler.consecutiveFailures) * 60000).toISOString();
+    await deps.saveScheduler(deps.scheduler);
+    await deps.saveTask(task);
+    await deps.notify(draft(deps, task, "warning", "Review blocked", formatReasonBlock([detail]), "Fix repository credentials, then retry."));
+    await rememberBuild(deps, task, "failed", detail);
+    return { action: "failed", taskId: task.id, detail };
+  }
   task.checksPassed = true;
   task.exceptionNote = gates.notes.length && !validation.passed ? gates.notes.join("; ") : task.exceptionNote;
   const review = transitionTask(task, "review", {

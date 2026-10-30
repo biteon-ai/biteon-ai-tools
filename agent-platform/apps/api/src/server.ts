@@ -22,6 +22,7 @@ import {
   nowIso,
   type Agent,
   type ProviderRecord,
+  type SchedulerState,
   type Stage,
   type StoredSecret,
   type Task,
@@ -212,12 +213,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   app.get("/api/agents/:id", async (request, reply) => {
     const agent = await requireAgent(deps, request, reply);
     if (!agent) return;
-    const [workflow, tasks, events, memories, runs] = await Promise.all([
+    const [workflow, tasks, events, memories, runs, scheduler] = await Promise.all([
       deps.store.getWorkflow(agent.id),
       deps.store.listTasks(agent.id),
       deps.store.listEvents(agent.id, 50),
       deps.store.listMemories(agent.id),
       deps.store.listRuns(agent.id),
+      deps.store.getScheduler(agent.id),
     ]);
     return {
       agent: await publicAgent(deps, agent),
@@ -226,6 +228,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       events,
       memories,
       runs,
+      scheduler: scheduler ?? emptyScheduler(agent.id),
     };
   });
   app.patch("/api/agents/:id", async (request, reply) => {
@@ -293,6 +296,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       const status = action === "stop" ? "stopped" : action === "pause" ? "paused" : "running";
       const next = { ...agent, status, updatedAt: nowIso() } as Agent;
       await deps.store.updateAgent(next);
+      if (action === "restart") await resetScheduler(deps, agent.id, { enqueue: false });
       if (action === "start" || action === "resume" || action === "restart") await deps.queue.enqueue(agent.id);
       await audit(deps, request.userId, `agent.${action}`, agent.id);
       return next;
@@ -304,6 +308,25 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!agent) return;
     await deps.queue.enqueue(agent.id);
     return { queued: true };
+  });
+
+  app.post("/api/agents/:id/run-now", async (request, reply) => {
+    const agent = await requireAgent(deps, request, reply);
+    if (!agent) return;
+    const next = { ...agent, status: "running" as const, updatedAt: nowIso() };
+    await deps.store.updateAgent(next);
+    const scheduler = await resetScheduler(deps, agent.id, { enqueue: true });
+    await deps.store.addEvent({
+      id: newId(),
+      agentId: agent.id,
+      taskId: null,
+      kind: "scheduler",
+      message: "Scheduler reset — run now requested (backoff cleared)",
+      metadata: { consecutiveFailures: 0 },
+      createdAt: nowIso(),
+    });
+    await audit(deps, request.userId, "agent.run-now", agent.id);
+    return { agent: await publicAgent(deps, next), scheduler, queued: true };
   });
 
   app.get("/api/agents/:id/tasks", async (request) => deps.store.listTasks(idParam(request)));
@@ -681,6 +704,77 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return { tasks: refreshed.tasks, notices: refreshed.notices, boardError: refreshed.boardError };
   });
 
+  app.get("/api/tasks/:id/activity", async (request, reply) => {
+    const task = await deps.store.getTask(idParam(request));
+    if (!task) return reply.code(404).send({ error: "task not found" });
+    const agent = await deps.store.getAgent(task.agentId);
+    if (!agent) return reply.code(404).send({ error: "agent not found" });
+    const [runs, events, scheduler] = await Promise.all([
+      deps.store.listRuns(agent.id),
+      deps.store.listEventsForTask(task.id, 250),
+      deps.store.getScheduler(agent.id),
+    ]);
+    const taskRuns = runs
+      .filter((run) => run.taskId === task.id)
+      .sort((left, right) => right.startedAt.localeCompare(left.startedAt));
+    const checkpoints = await deps.store.listCheckpointsForRuns(taskRuns.map((run) => run.id));
+    const activeRun = taskRuns.find((run) => run.status === "running")
+      ?? (scheduler?.activeRunId ? taskRuns.find((run) => run.id === scheduler.activeRunId) ?? null : null);
+    return {
+      task: {
+        id: task.id,
+        title: task.title,
+        stage: task.stage,
+        externalId: task.externalId,
+        branchName: task.branchName,
+        blockedReason: task.blockedReason,
+        updatedAt: task.updatedAt,
+      },
+      activeRun: activeRun
+        ? {
+            id: activeRun.id,
+            status: activeRun.status,
+            activity: activeRun.activity,
+            modelId: activeRun.modelId,
+            summary: activeRun.summary,
+            error: activeRun.error,
+            startedAt: activeRun.startedAt,
+            finishedAt: activeRun.finishedAt,
+          }
+        : null,
+      runs: taskRuns.map((run) => ({
+        id: run.id,
+        status: run.status,
+        activity: run.activity,
+        modelId: run.modelId,
+        summary: run.summary,
+        error: run.error,
+        startedAt: run.startedAt,
+        finishedAt: run.finishedAt,
+      })),
+      events: events
+        .slice()
+        .reverse()
+        .map((event) => ({
+          id: event.id,
+          kind: event.kind,
+          message: event.message,
+          metadata: event.metadata,
+          createdAt: event.createdAt,
+        })),
+      checkpoints: checkpoints
+        .slice()
+        .reverse()
+        .map((checkpoint) => ({
+          id: checkpoint.id,
+          taskRunId: checkpoint.taskRunId,
+          step: checkpoint.step,
+          note: checkpoint.note,
+          ownedFiles: checkpoint.ownedFiles,
+          createdAt: checkpoint.createdAt,
+        })),
+    };
+  });
   app.post("/api/tasks/:id/approve", async (request, reply) => decide(deps, request, reply, "approved"));
   app.post("/api/tasks/:id/reject", async (request, reply) => decide(deps, request, reply, "rejected"));
   app.post("/api/tasks/:id/move", async (request, reply) => moveTask(deps, request, reply));
@@ -1149,6 +1243,36 @@ async function credentialsFor(deps: ServerDeps, agent: Agent): Promise<{ key: st
   const secret = await deps.store.getSecret(agent.credentialSecretId);
   if (!secret) return { key: "", token: "" };
   return parseCredentials(decryptSecret(secret, deps.env.APP_MASTER_KEY), agent.provider);
+}
+
+async function resetScheduler(deps: ServerDeps, agentId: string, opts: { enqueue: boolean }): Promise<SchedulerState> {
+  const current = (await deps.store.getScheduler(agentId)) ?? emptyScheduler(agentId);
+  if (current.activeRunId) {
+    const run = await deps.store.findRun(current.activeRunId);
+    if (run && run.status === "running") {
+      run.status = "failed";
+      run.error = run.error || "Cleared by Run now / scheduler reset";
+      run.finishedAt = nowIso();
+      await deps.store.updateRun(run);
+    }
+  }
+  const running = (await deps.store.listRuns(agentId)).filter((run) => run.status === "running");
+  for (const run of running) {
+    run.status = "failed";
+    run.error = run.error || "Cleared by Run now / scheduler reset";
+    run.finishedAt = nowIso();
+    await deps.store.updateRun(run);
+  }
+  const next: SchedulerState = {
+    ...current,
+    activeRunId: null,
+    consecutiveFailures: 0,
+    retryAt: null,
+    lastTickAt: nowIso(),
+  };
+  await deps.store.saveScheduler(next);
+  if (opts.enqueue) await deps.queue.enqueue(agentId);
+  return next;
 }
 
 async function moveTask(deps: ServerDeps, request: FastifyRequest, reply: FastifyReply) {

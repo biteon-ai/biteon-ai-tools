@@ -47,8 +47,10 @@ export interface PlatformStore {
   updateRun(run: TaskRun): Promise<TaskRun>;
   addEvent(event: TaskEvent): Promise<TaskEvent>;
   listEvents(agentId?: string, limit?: number): Promise<TaskEvent[]>;
+  listEventsForTask(taskId: string, limit?: number): Promise<TaskEvent[]>;
   saveCheckpoint(checkpoint: Checkpoint): Promise<Checkpoint>;
   latestCheckpoint(taskRunId: string): Promise<Checkpoint | null>;
+  listCheckpointsForRuns(runIds: string[]): Promise<Checkpoint[]>;
   createApproval(approval: Approval): Promise<Approval>;
   latestApproval(taskId: string): Promise<Approval | null>;
   listMemories(agentId: string): Promise<Memory[]>;

@@ -639,4 +639,83 @@ describe("api", () => {
     expect((await store.listTasks(agent.id)).find((item) => item.externalId === "card-1")?.stage).toBe("doing");
     await app.close();
   });
+
+  it("returns live activity for a doing ticket", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "agent-api-activity-"));
+    const store = new MemoryStore();
+    await store.createUser({
+      id: newId(),
+      email: "admin@example.com",
+      passwordHash: await hashPassword("change-me-now"),
+      createdAt: nowIso(),
+    });
+    const app = buildServer({
+      store,
+      env: env(dir),
+      queue: { async enqueue() {}, async ping() { return true; } },
+      pairing: memoryPairingStore(),
+    });
+    const login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "admin@example.com", password: "change-me-now" } });
+    const cookie = String(login.headers["set-cookie"]).split(";")[0];
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/agents",
+      headers: { cookie },
+      payload: { boardName: "Watch", repositoryName: "acme/watch", executorKind: "fake", repositoryToken: "ghp_test_repository_token" },
+    });
+    expect(created.statusCode).toBe(201);
+    const agent = created.json();
+    const taskResponse = await app.inject({
+      method: "POST",
+      url: `/api/agents/${agent.id}/tasks`,
+      headers: { cookie },
+      payload: { title: "Watch me work" },
+    });
+    const task = taskResponse.json();
+    task.stage = "doing";
+    await store.saveTask(task);
+    const runId = newId();
+    await store.createRun({
+      id: runId,
+      taskId: task.id,
+      agentId: agent.id,
+      executorId: "fake",
+      status: "running",
+      activity: "coding",
+      modelId: "fake",
+      costClass: "none",
+      summary: "",
+      error: "",
+      tokensIn: 0,
+      tokensOut: 0,
+      startedAt: nowIso(),
+      finishedAt: null,
+    });
+    await store.addEvent({
+      id: newId(),
+      agentId: agent.id,
+      taskId: task.id,
+      kind: "executor_thinking",
+      message: "Planning the auth change",
+      metadata: { progressKind: "thinking", runId },
+      createdAt: nowIso(),
+    });
+    await store.saveCheckpoint({
+      id: newId(),
+      taskRunId: runId,
+      agentId: agent.id,
+      step: 1,
+      note: "Wrote src/auth.ts",
+      ownedFiles: ["src/auth.ts"],
+      createdAt: nowIso(),
+    });
+    const activity = await app.inject({ method: "GET", url: `/api/tasks/${task.id}/activity`, headers: { cookie } });
+    expect(activity.statusCode).toBe(200);
+    const body = activity.json();
+    expect(body.task.title).toBe("Watch me work");
+    expect(body.activeRun?.status).toBe("running");
+    expect(body.events[0].message).toBe("Planning the auth change");
+    expect(body.checkpoints[0].note).toBe("Wrote src/auth.ts");
+    await app.close();
+  });
 });

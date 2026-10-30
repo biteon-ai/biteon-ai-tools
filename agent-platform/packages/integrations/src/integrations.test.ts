@@ -330,7 +330,7 @@ describe("integrations", () => {
       dependsOn: [],
       dueAt: null,
       plan: "",
-      branchName: "",
+      branchName: "agent/card-42",
       prUrl: "",
       blockedReason: "",
       exceptionNote: "",
@@ -348,6 +348,148 @@ describe("integrations", () => {
       const head = await runtime.exec(agent.id, "git", ["log", "-1", "--pretty=%s"], { hostCwd: path.join(workspace, directory), timeoutMs: 10000 });
       expect(head.stdout.trim()).toBe("Add export (task card-42)");
     }
+  });
+
+  it("pushes the task branch even when ownedFiles is empty", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "agent-push-"));
+    const remote = path.join(root, "remote.git");
+    const workspace = path.join(root, "workspace");
+    const runtime = new ProcessRuntime();
+    const fixture = (cwd: string, args: string[]) => gitFixture("git", args, { cwd });
+    await mkdir(remote, { recursive: true });
+    await fixture(remote, ["init", "--bare", "-b", "main"]);
+    await mkdir(workspace, { recursive: true });
+    await fixture(workspace, ["clone", remote, "."]);
+    await fixture(workspace, ["config", "user.email", "agent@localhost"]);
+    await fixture(workspace, ["config", "user.name", "Agent"]);
+    await writeFile(path.join(workspace, "README.md"), "base\n", "utf8");
+    await fixture(workspace, ["add", "README.md"]);
+    await fixture(workspace, ["commit", "-m", "base"]);
+    await fixture(workspace, ["push", "origin", "HEAD:main"]);
+    const agent: Agent = {
+      id: newId(),
+      name: "Repo Agent",
+      description: "",
+      status: "running",
+      repositoryUrl: remote,
+      repositoryName: "acme/repo",
+      linkedRepositories: [],
+      defaultBranch: "main",
+      provider: "none",
+      boardId: "",
+      boardName: "Repo",
+      workspacePath: workspace,
+      executorKind: "fake",
+      dailyCapacityHours: 8,
+      allowOverCapacity: false,
+      credentialSecretId: null,
+      repositorySecretId: null,
+      telegramChatId: "",
+      rules: defaultRules(),
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    await runtime.ensure(agent);
+    const git = new WorkspaceGit(runtime);
+    const task = {
+      id: "task-push",
+      agentId: agent.id,
+      externalId: "card-push",
+      title: "Ship branch",
+      description: "",
+      acceptanceCriteria: "",
+      comments: [],
+      url: "",
+      stage: "doing" as const,
+      priority: 1,
+      estimateHours: 1,
+      dependsOn: [],
+      dueAt: null,
+      plan: "",
+      branchName: "agent/card-push",
+      prUrl: "",
+      blockedReason: "",
+      exceptionNote: "",
+      checksPassed: false,
+      labels: [],
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    await git.prepare(agent, task, []);
+    await writeFile(path.join(workspace, "FEATURE.md"), "done\n", "utf8");
+    await fixture(workspace, ["add", "FEATURE.md"]);
+    await fixture(workspace, ["commit", "-m", "feat: local only"]);
+    await git.commitAndPush(agent, task, [], "should still push");
+    const remoteBranches = await fixture(remote, ["branch", "--list", "agent/card-push"]);
+    expect(remoteBranches.stdout).toContain("agent/card-push");
+  });
+
+  it("releases a sibling worktree that already holds the ticket branch", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "agent-wt-"));
+    const runtime = new ProcessRuntime();
+    const agent: Agent = {
+      id: newId(),
+      name: "Repo Agent",
+      description: "",
+      status: "running",
+      repositoryUrl: "",
+      repositoryName: "acme/core",
+      linkedRepositories: [],
+      defaultBranch: "main",
+      provider: "none",
+      boardId: "",
+      boardName: "Repo",
+      workspacePath: workspace,
+      executorKind: "fake",
+      dailyCapacityHours: 8,
+      allowOverCapacity: false,
+      credentialSecretId: null,
+      repositorySecretId: null,
+      telegramChatId: "",
+      rules: defaultRules(),
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    await runtime.ensure(agent);
+    const cwd = workspace;
+    await runtime.exec(agent.id, "git", ["init", "-b", "main"], { hostCwd: cwd, timeoutMs: 10000 });
+    await runtime.exec(agent.id, "git", ["config", "user.email", "test@localhost"], { hostCwd: cwd, timeoutMs: 10000 });
+    await runtime.exec(agent.id, "git", ["config", "user.name", "Test"], { hostCwd: cwd, timeoutMs: 10000 });
+    await writeFile(path.join(cwd, "README.md"), "base\n", "utf8");
+    await runtime.exec(agent.id, "git", ["add", "README.md"], { hostCwd: cwd, timeoutMs: 10000 });
+    await runtime.exec(agent.id, "git", ["commit", "-m", "base"], { hostCwd: cwd, timeoutMs: 10000 });
+    await runtime.exec(agent.id, "git", ["branch", "agent/card-wt"], { hostCwd: cwd, timeoutMs: 10000 });
+    const wt = path.join(workspace, "wt-takeover");
+    await gitFixture("git", ["worktree", "add", wt, "agent/card-wt"], { cwd });
+    const prepared = await new WorkspaceGit(runtime).prepare(agent, {
+      id: "task-wt",
+      agentId: agent.id,
+      externalId: "card-wt",
+      title: "Recover branch",
+      description: "",
+      acceptanceCriteria: "",
+      comments: [],
+      url: "",
+      stage: "doing",
+      priority: 1,
+      estimateHours: 1,
+      dependsOn: [],
+      dueAt: null,
+      plan: "",
+      branchName: "agent/card-wt",
+      prUrl: "",
+      blockedReason: "",
+      exceptionNote: "",
+      checksPassed: false,
+      labels: [],
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    }, []);
+    expect(prepared.branch).toBe("agent/card-wt");
+    const current = await runtime.exec(agent.id, "git", ["branch", "--show-current"], { hostCwd: cwd, timeoutMs: 10000 });
+    expect(current.stdout.trim()).toBe("agent/card-wt");
+    const trees = await runtime.exec(agent.id, "git", ["worktree", "list"], { hostCwd: cwd, timeoutMs: 10000 });
+    expect(trees.stdout).not.toContain("wt-takeover");
   });
 
   it("reads a Trello card move and registers a webhook without returning the token", async () => {

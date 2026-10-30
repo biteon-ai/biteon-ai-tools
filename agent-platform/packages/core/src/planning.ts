@@ -142,7 +142,18 @@ export function slugify(input: string): string {
   return slug || "task";
 }
 
+/** Speckit feature branches look like `044-chat-takeover`. */
+export function isSpeckitBranch(name: string): boolean {
+  return /^\d{3}-[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(name.trim());
+}
+
+export function usesSpeckitBranches(pattern: string): boolean {
+  const normalized = pattern.trim().toLowerCase();
+  return normalized === "speckit" || normalized === "{speckit}";
+}
+
 export function branchName(pattern: string, task: Pick<Task, "externalId" | "title">): string {
+  if (usesSpeckitBranches(pattern)) return "";
   const name = pattern
     .replaceAll("{task}", slugify(task.externalId))
     .replaceAll("{slug}", slugify(task.title));

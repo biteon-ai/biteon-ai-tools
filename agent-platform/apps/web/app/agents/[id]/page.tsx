@@ -7,6 +7,7 @@ import { appDateKey, formatAppDateTime } from "../../../lib/time";
 import { useToast } from "../../../components/Toast";
 import { Icon } from "../../../components/Icons";
 import { Chip, StatusBadge } from "../../../components/ui";
+import { ActivityWatchModal } from "../../../components/ActivityWatch";
 
 interface AgentRecord {
   id: string;
@@ -51,6 +52,7 @@ interface Detail {
   events: { id: string; message: string; createdAt: string }[];
   memories: { id: string; kind: string; title: string; body: string; revision: number }[];
   runs: { id: string; taskId?: string; status: string; startedAt?: string; summary: string; error?: string; costClass: string }[];
+  scheduler?: { activeRunId: string | null; consecutiveFailures: number; retryAt: string | null; lastTickAt: string | null };
 }
 
 const CONFIG_COLUMNS = [
@@ -194,6 +196,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
   const [openLogIds, setOpenLogIds] = useState<Record<string, boolean>>({});
   const [showRuns, setShowRuns] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [watchingId, setWatchingId] = useState<string | null>(null);
 
   useEffect(() => { void params.then((value) => setId(value.id)); }, [params]);
   useEffect(() => {
@@ -259,6 +262,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   async function action(name: string) {
+    setPending(name);
     try {
       await api(`/api/agents/${id}/${name}`, { method: "POST" });
       const next = await api<Detail>(`/api/agents/${id}`);
@@ -267,6 +271,22 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
       toast(`${next.agent.name} ${name} completed`, tone);
     } catch (err) {
       toast(err instanceof Error ? err.message : "Action failed", "error");
+    } finally {
+      setPending("");
+    }
+  }
+
+  async function runNow() {
+    setPending("run-now");
+    try {
+      await api(`/api/agents/${id}/run-now`, { method: "POST" });
+      const next = await api<Detail>(`/api/agents/${id}`);
+      setData(next);
+      toast("Scheduler reset — agent will start now", "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not start the scheduler", "error");
+    } finally {
+      setPending("");
     }
   }
 
@@ -485,6 +505,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
 
   if (!data) return <p className="text-sm text-slate-400">Loading agent…</p>;
   const selected = data.tasks.find((task) => task.id === selectedId) ?? null;
+  const watchingTask = data.tasks.find((task) => task.id === watchingId) ?? null;
   return (
     <div className="space-y-6">
       <header className="space-y-3">
@@ -498,12 +519,28 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
           <Chip>{data.agent.executorKind}</Chip>
         </div>
       </header>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          className="btn"
+          disabled={pending !== ""}
+          onClick={() => void runNow()}
+          title="Clear backoff, reset failed runs, and queue a tick immediately"
+        >
+          {pending === "run-now" ? "Starting…" : "Run now"}
+        </button>
         {["start", "pause", "resume", "restart", "stop", "tick", "sync"].map((name) => (
-          <button key={name} className="btn-ghost capitalize" disabled={pending !== ""} onClick={() => void (name === "sync" ? refreshBoard() : action(name))}>{pending === "board" && name === "sync" ? "Syncing…" : name}</button>
+          <button key={name} className="btn-ghost capitalize" disabled={pending !== ""} onClick={() => void (name === "sync" ? refreshBoard() : action(name))}>{pending === name || (pending === "board" && name === "sync") ? `${name}…` : name}</button>
         ))}
-        <button className="btn-ghost text-rose-300" onClick={() => void remove()}>Remove</button>
+        <button className="btn-ghost text-rose-300" disabled={pending !== ""} onClick={() => void remove()}>Remove</button>
       </div>
+      {data.scheduler?.retryAt && Date.parse(data.scheduler.retryAt) > Date.now() ? (
+        <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+          Scheduler is in backoff until {formatAppDateTime(data.scheduler.retryAt)}
+          {data.scheduler.consecutiveFailures > 0 ? ` after ${data.scheduler.consecutiveFailures} failures` : ""}.
+          {" "}Use <span className="font-medium">Run now</span> to clear it and start immediately.
+        </p>
+      ) : null}
       <section className="card p-4">
         <button type="button" className="flex w-full items-center justify-between gap-3 text-left" aria-expanded={showConfig} aria-controls="agent-configuration" onClick={() => setShowConfig((open) => !open)}>
           <span className="flex items-center gap-2 font-medium"><Icon name="settings" />Configuration</span>
@@ -817,6 +854,19 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
                           {column.stage === "doing" ? <DoingMeter task={task} runs={data.runs} /> : null}
                           {task.blockedReason ? <p className="mt-2 text-xs text-amber-300">{task.blockedReason}</p> : null}
                         </button>
+                        {column.stage === "doing" || column.stage === "review" || column.stage === "blocked" || column.stage === "failed" ? (
+                          <button
+                            type="button"
+                            className="btn-ghost mt-2 w-full justify-center gap-1 text-xs"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setWatchingId(task.id);
+                            }}
+                          >
+                            <Icon name="spark" className="h-3.5 w-3.5" />
+                            {column.stage === "doing" ? "Watch activity" : "Activity history"}
+                          </button>
+                        ) : null}
                         {column.stage === "blocked" || column.stage === "failed" ? (
                           <button
                             type="button"
@@ -908,6 +958,12 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
               <button type="button" className="btn-ghost" onClick={() => setSelectedId(null)}>Close</button>
             </div>
             {selected.stage === "doing" ? <div className="mb-4"><DoingMeter task={selected} runs={data.runs} /></div> : null}
+            {selected.stage === "doing" || selected.stage === "review" || selected.stage === "blocked" || selected.stage === "failed" ? (
+              <button type="button" className="btn mb-4 w-full justify-center gap-2" onClick={() => { setWatchingId(selected.id); setSelectedId(null); }}>
+                <Icon name="spark" className="h-4 w-4" />
+                {selected.stage === "doing" ? "Watch live activity" : "Open activity history"}
+              </button>
+            ) : null}
             {selected.description ? <p className="mb-4 whitespace-pre-wrap text-sm text-slate-300">{selected.description}</p> : null}
             {selected.blockedReason ? <p className="mb-4 text-sm text-amber-300">{selected.blockedReason}</p> : null}
             {selected.stage === "blocked" || selected.stage === "failed" ? (
@@ -935,6 +991,13 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
             ) : null}
           </div>
         </div>
+      ) : null}
+      {watchingId ? (
+        <ActivityWatchModal
+          taskId={watchingId}
+          taskTitle={watchingTask?.title ?? "Ticket"}
+          onClose={() => setWatchingId(null)}
+        />
       ) : null}
     </div>
   );

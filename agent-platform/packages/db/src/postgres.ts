@@ -136,6 +136,15 @@ export class PostgresStore implements PlatformStore {
     const rows = agentId ? await query.where(eq(schema.taskEvents.agentId, agentId)) : await query;
     return rows.map((row) => ({ ...row, createdAt: iso(row.createdAt) }));
   }
+  async listEventsForTask(taskId: string, limit = 200): Promise<TaskEvent[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.taskEvents)
+      .where(eq(schema.taskEvents.taskId, taskId))
+      .orderBy(desc(schema.taskEvents.createdAt))
+      .limit(limit);
+    return rows.map((row) => ({ ...row, createdAt: iso(row.createdAt) }));
+  }
   async saveCheckpoint(checkpoint: Checkpoint): Promise<Checkpoint> {
     await this.db.insert(schema.checkpoints).values({ ...checkpoint, createdAt: date(checkpoint.createdAt) });
     return checkpoint;
@@ -149,6 +158,15 @@ export class PostgresStore implements PlatformStore {
       .limit(1);
     const row = rows[0];
     return row ? { ...row, createdAt: iso(row.createdAt) } : null;
+  }
+  async listCheckpointsForRuns(runIds: string[]): Promise<Checkpoint[]> {
+    if (runIds.length === 0) return [];
+    const rows = await this.db
+      .select()
+      .from(schema.checkpoints)
+      .where(inArray(schema.checkpoints.taskRunId, runIds))
+      .orderBy(desc(schema.checkpoints.createdAt));
+    return rows.map((row) => ({ ...row, createdAt: iso(row.createdAt) }));
   }
   async createApproval(approval: Approval): Promise<Approval> {
     await this.db.insert(schema.approvals).values({

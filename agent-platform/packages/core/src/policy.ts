@@ -44,6 +44,8 @@ const ALLOWED_GIT = new Set([
   "merge-tree",
   "merge-base",
   "merge",
+  "stash",
+  "worktree",
 ]);
 
 export function resolveInWorkspace(workspace: string, input: string): string {
@@ -81,21 +83,40 @@ export function assertGitAllowed(args: string[], options?: { humanMergeApproval?
   if (sub === "merge" && !options?.humanMergeApproval) throw new PolicyError(MERGE_BLOCKED);
   if (sub === "pull" && !rest.includes("--ff-only")) throw new PolicyError("git pull must be fast-forward only");
   if (!sub || !ALLOWED_GIT.has(sub)) throw new PolicyError(`git ${sub ?? ""} is not allowed`);
-  const forbidden = rest.some((arg) => {
-    const lower = arg.toLowerCase();
-    return (
-      lower === "--force" ||
-      lower === "-f" ||
-      lower === "--force-with-lease" ||
-      lower === "--no-verify" ||
-      lower === "--mirror" ||
-      lower === "--hard" ||
-      lower === "--amend" ||
-      lower.startsWith("--force") ||
-      arg.startsWith("+")
-    );
-  });
-  if (forbidden) throw new PolicyError("destructive git flag is not allowed");
+  if (sub === "worktree") {
+    const action = rest[0];
+    if (!action || !["list", "remove", "prune"].includes(action)) {
+      throw new PolicyError("git worktree only allows list, remove, or prune");
+    }
+    if (action === "remove") {
+      const bad = rest.slice(1).some((arg) => {
+        const lower = arg.toLowerCase();
+        return lower === "--force-with-lease" || lower === "--no-verify" || lower === "--mirror" || lower === "--hard" || lower === "--amend" || arg.startsWith("+");
+      });
+      if (bad) throw new PolicyError("destructive git flag is not allowed");
+    } else if (rest.slice(1).some((arg) => {
+      const lower = arg.toLowerCase();
+      return lower === "--force" || lower === "-f" || lower.startsWith("--force") || lower === "--no-verify" || arg.startsWith("+");
+    })) {
+      throw new PolicyError("destructive git flag is not allowed");
+    }
+  } else {
+    const forbidden = rest.some((arg) => {
+      const lower = arg.toLowerCase();
+      return (
+        lower === "--force" ||
+        lower === "-f" ||
+        lower === "--force-with-lease" ||
+        lower === "--no-verify" ||
+        lower === "--mirror" ||
+        lower === "--hard" ||
+        lower === "--amend" ||
+        lower.startsWith("--force") ||
+        arg.startsWith("+")
+      );
+    });
+    if (forbidden) throw new PolicyError("destructive git flag is not allowed");
+  }
   if (sub === "push" && rest.some((arg) => arg === "--delete" || arg === ":")) {
     throw new PolicyError("deleting remote branches is not allowed");
   }

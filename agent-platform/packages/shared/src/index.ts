@@ -411,6 +411,19 @@ export interface ExecutorModel {
   providerType: ProviderType;
 }
 
+export type ExecutorProgressKind = "thinking" | "assistant" | "tool" | "status" | "task";
+
+export interface ExecutorProgress {
+  kind: ExecutorProgressKind;
+  text: string;
+  tool?: string;
+  status?: string;
+  /** Relative or absolute path when a file tool is involved. */
+  path?: string;
+  /** Short code / diff preview extracted from edit/write tool args or results. */
+  snippet?: string;
+}
+
 export interface ExecutorRun {
   runId: string;
   agentId: string;
@@ -420,6 +433,8 @@ export interface ExecutorRun {
   model: ExecutorModel;
   limits: { timeoutMs: number; maxSteps: number; maxTokens: number };
   checkpoint: ExecutorCheckpoint | null;
+  /** Live thinking / tool / status updates for the activity watcher. */
+  onProgress?: (update: ExecutorProgress) => void | Promise<void>;
 }
 
 export interface ExecutorResult {
